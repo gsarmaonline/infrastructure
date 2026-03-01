@@ -47,3 +47,9 @@ cd aws/manifests/common        # or any other manifest directory
 terraform init
 terraform apply -var-file=vars.tfvars
 ```
+
+# todo
+- vpn based ssh access
+- install k8s
+- setup argocd
+- secret manager
