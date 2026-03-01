@@ -1,0 +1,30 @@
+---
+# App-of-Apps: ArgoCD Application that watches k8s/apps/ in this repo.
+# Each subdirectory under k8s/apps/ is expected to be an ArgoCD Application.
+# ArgoCD will discover and sync all apps automatically.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-of-apps
+  namespace: argocd
+  # Cascade delete: removing this Application also removes all child apps
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    # TODO: update repoURL to your GitHub repo URL
+    repoURL: https://github.com/YOUR_ORG/YOUR_REPO.git
+    targetRevision: main
+    path: k8s/apps
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true      # remove resources deleted from git
+      selfHeal: true   # revert manual changes made in the cluster
+    syncOptions:
+      - CreateNamespace=true

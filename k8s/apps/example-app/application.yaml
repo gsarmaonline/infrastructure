@@ -1,0 +1,27 @@
+---
+# ArgoCD Application for example-app.
+# The app-of-apps Application (k8s/system/argocd/app-of-apps.yaml) discovers
+# this file and tells ArgoCD to sync the example-app manifests.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: example-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    # TODO: update repoURL to your GitHub repo URL
+    repoURL: https://github.com/YOUR_ORG/YOUR_REPO.git
+    targetRevision: main
+    path: k8s/apps/example-app
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: example-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
