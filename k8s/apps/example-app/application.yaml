@@ -13,7 +13,7 @@ spec:
   project: default
   source:
     # TODO: update repoURL to your GitHub repo URL
-    repoURL: https://github.com/YOUR_ORG/YOUR_REPO.git
+    repoURL: https://github.com/gsarmaonline/infrastructure.git
     targetRevision: main
     path: k8s/apps/example-app
   destination:
