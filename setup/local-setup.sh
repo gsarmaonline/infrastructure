@@ -76,12 +76,13 @@ VM_STATUS=$(limactl list --format '{{.Name}} {{.Status}}' 2>/dev/null \
 
 if [ -z "${VM_STATUS}" ]; then
   info "Creating VM from ${LIMA_YAML}…"
-  # Build override args for cpu/memory/disk if the caller set them
-  OVERRIDES=()
-  [ -n "${VM_CPUS}"   ] && OVERRIDES+=(--cpus="${VM_CPUS}")
-  [ -n "${VM_MEMORY}" ] && OVERRIDES+=(--memory="${VM_MEMORY}")
-  [ -n "${VM_DISK}"   ] && OVERRIDES+=(--disk="${VM_DISK}")
-  limactl create --name "${VM_NAME}" "${OVERRIDES[@]}" "${LIMA_YAML}"
+  # Build the full arg list in one array (always non-empty, so safe under set -u)
+  CREATE_ARGS=(--name "${VM_NAME}")
+  [ -n "${VM_CPUS}"   ] && CREATE_ARGS+=(--cpus="${VM_CPUS}")
+  [ -n "${VM_MEMORY}" ] && CREATE_ARGS+=(--memory="${VM_MEMORY}")
+  [ -n "${VM_DISK}"   ] && CREATE_ARGS+=(--disk="${VM_DISK}")
+  CREATE_ARGS+=("${LIMA_YAML}")
+  limactl create "${CREATE_ARGS[@]}"
   limactl start "${VM_NAME}"
   ok "VM created and started"
 elif [ "${VM_STATUS}" = "Stopped" ]; then
