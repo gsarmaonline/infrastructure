@@ -19,11 +19,17 @@ REPO_K8S_DIR="${REPO_ROOT}/k8s"
 
 # ── Auto-detect git repo URL and patch application.yaml placeholders ──────────
 REPO_URL=$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || echo "")
+# Convert SSH remote (git@github.com:org/repo.git) to HTTPS so ArgoCD can
+# clone without SSH keys. HTTPS works for both public and token-authed repos.
+if echo "${REPO_URL}" | grep -q "^git@"; then
+  REPO_URL="https://$(echo "${REPO_URL}" | sed 's|git@||;s|:|/|')"
+fi
 if [ -n "${REPO_URL}" ]; then
   echo "Detected repo URL: ${REPO_URL}"
-  find "${REPO_K8S_DIR}" -name "application.yaml" \
+  # Patch all application.yaml files AND app-of-apps.yaml
+  find "${REPO_K8S_DIR}" \( -name "application.yaml" -o -name "app-of-apps.yaml" \) \
     -exec sed -i "s|https://github.com/YOUR_ORG/YOUR_REPO.git|${REPO_URL}|g" {} \;
-  echo "Patched repoURL in all application.yaml files."
+  echo "Patched repoURL in all application.yaml + app-of-apps.yaml files."
 else
   echo "WARNING: Could not detect git remote URL. Placeholders in application.yaml not patched."
   echo "  Set repoURL manually or push to a git remote before running."
@@ -79,7 +85,9 @@ kubectl apply -f "${REPO_K8S_DIR}/system/argocd/app-of-apps.yaml"
 echo "Installing cert-manager..."
 kubectl apply -f "${REPO_K8S_DIR}/system/cert-manager/application.yaml"
 
-echo "Waiting for cert-manager to be ready (up to 3 min)..."
+echo "Waiting for cert-manager namespace (ArgoCD syncs it — up to 3 min)..."
+until kubectl get namespace cert-manager &>/dev/null; do sleep 5; done
+echo "Waiting for cert-manager deployment to be available..."
 kubectl wait --for=condition=available deployment/cert-manager \
   -n cert-manager --timeout=180s
 
