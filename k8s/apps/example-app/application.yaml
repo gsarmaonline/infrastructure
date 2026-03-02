@@ -19,6 +19,13 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: example-app
+  ignoreDifferences:
+    - group: networking.k8s.io
+      kind: Ingress
+      jsonPointers:
+        - /spec/rules/0/host
+        - /spec/tls/0/hosts/0
+        - /spec/tls/0/secretName
   syncPolicy:
     automated:
       prune: true

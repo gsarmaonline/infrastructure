@@ -32,6 +32,8 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
 │
 ├── setup/                  # Node initialization scripts
 │   ├── init.sh             # k3s server install + ArgoCD bootstrap (runs via user_data)
+│   ├── verify.sh           # Post-bootstrap health check (node, ArgoCD, certs, ESO)
+│   ├── new-app.sh          # Scaffold a new app from the example-app template
 │   ├── worker-init.sh      # k3s agent join script for worker nodes
 │   └── vpn-firewall.sh     # Restricts SSH + k3s API to VPN peers (optional)
 │
@@ -66,6 +68,17 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
 ### Server node
 All EC2 instances and DigitalOcean Droplets run `setup/init.sh` on first boot via `user_data` (cloud-init). This installs k3s in server mode and bootstraps ArgoCD.
 
+### Verify bootstrap
+
+After `init.sh` completes, run the health-check script to confirm every layer is working:
+
+```bash
+bash setup/verify.sh              # auto-detects node IP
+NODE_IP=1.2.3.4 bash verify.sh   # explicit override
+```
+
+It checks: k3s node Ready → ArgoCD apps Synced/Healthy → cert-manager + ClusterIssuers → ESO + ClusterSecretStore → all Certificates → patches the `example-app` ingress to `example-app.<NODE_IP>.nip.io`. Ends with an access summary (ArgoCD URL + admin password).
+
 ### Worker nodes
 Worker nodes run `setup/worker-init.sh`, which joins an existing k3s cluster. Pass `K3S_URL` and `K3S_TOKEN` as environment variables in `user_data`:
 
@@ -78,15 +91,18 @@ user_data = templatefile("setup/worker-init.sh", {
 
 ## Kubernetes / GitOps
 
-ArgoCD watches `k8s/apps/` and auto-syncs on every push to `main`. To deploy a new app:
+ArgoCD watches `k8s/apps/` and auto-syncs on every push to `main`. To deploy a new app, use the scaffold script:
 
-1. Create `k8s/apps/<your-app>/` with `deployment.yaml`, `service.yaml`, `ingress.yaml`
-2. Add an `application.yaml` pointing ArgoCD at that path (copy from `example-app/`)
-3. Push — ArgoCD syncs within 3 minutes (or instantly via webhook)
+```bash
+APP_NAME=my-api IMAGE=ghcr.io/org/my-api:latest bash setup/new-app.sh
+# Optional overrides: PORT=8080  DOMAIN=api.example.com
+```
 
-Each app is routed by hostname via Traefik (k3s built-in). Set a unique `host:` in each app's `ingress.yaml` and point the subdomain's DNS A record at the node IP.
+This copies `k8s/apps/example-app/` into `k8s/apps/my-api/`, substitutes all names/image/port/domain, and prints the `git add / commit / push` commands to trigger a sync.
 
-**Before first use:** update `repoURL` in `k8s/system/argocd/app-of-apps.yaml` and each `application.yaml` to point at this repo.
+Each app is routed by hostname via Traefik (k3s built-in). By default the ingress host is set to `<app-name>.<node-ip>.nip.io` (no DNS setup required). Point a custom subdomain's A record at the node IP and pass it as `DOMAIN=` to use a real domain instead.
+
+**repoURL:** `init.sh` auto-detects the git remote and patches all `application.yaml` placeholders before applying anything, so no manual edits are needed before the first run.
 
 ## Secret Management
 

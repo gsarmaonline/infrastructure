@@ -13,8 +13,34 @@ set -euo pipefail
 
 ARGOCD_VERSION="v2.14.2"
 ARGOCD_INSTALL_URL="https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
-REPO_K8S_DIR="/root/k8s"
 SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SETUP_DIR}/.." && pwd)"
+REPO_K8S_DIR="${REPO_ROOT}/k8s"
+
+# ── Auto-detect git repo URL and patch application.yaml placeholders ──────────
+REPO_URL=$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null || echo "")
+if [ -n "${REPO_URL}" ]; then
+  echo "Detected repo URL: ${REPO_URL}"
+  find "${REPO_K8S_DIR}" -name "application.yaml" \
+    -exec sed -i "s|https://github.com/YOUR_ORG/YOUR_REPO.git|${REPO_URL}|g" {} \;
+  echo "Patched repoURL in all application.yaml files."
+else
+  echo "WARNING: Could not detect git remote URL. Placeholders in application.yaml not patched."
+  echo "  Set repoURL manually or push to a git remote before running."
+fi
+
+# ── Auto-detect public node IP ─────────────────────────────────────────────────
+NODE_IP="${NODE_IP:-$(
+  curl -sf --max-time 3 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null ||
+  curl -sf --max-time 3 http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address 2>/dev/null ||
+  curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || echo ""
+)}"
+if [ -n "${NODE_IP}" ]; then
+  echo "Detected node IP: ${NODE_IP}"
+else
+  echo "WARNING: Could not auto-detect node IP. ArgoCD ingress will use example.com placeholder."
+  echo "  Set NODE_IP env var before running, or edit ingress.yaml manually after bootstrap."
+fi
 
 echo "Starting k3s server setup..."
 
@@ -75,11 +101,18 @@ if [ -n "${VPN_SUBNET:-}" ]; then
 
   # Expose ArgoCD UI via Traefik with VPN IP-allowlist
   kubectl apply -f "${REPO_K8S_DIR}/system/argocd/vpn-middleware.yaml"
-  kubectl apply -f "${REPO_K8S_DIR}/system/argocd/ingress.yaml"
+  if [ -n "${NODE_IP}" ]; then
+    ARGOCD_HOST="argocd.${NODE_IP}.nip.io"
+    sed "s|argocd\.example\.com|${ARGOCD_HOST}|g" \
+      "${REPO_K8S_DIR}/system/argocd/ingress.yaml" | kubectl apply -f -
+  else
+    kubectl apply -f "${REPO_K8S_DIR}/system/argocd/ingress.yaml"
+    ARGOCD_HOST="argocd.example.com"
+  fi
 
   echo ""
   echo "VPN-gated access configured."
-  echo "  ArgoCD UI: http://argocd.example.com  (replace host in ingress.yaml)"
+  echo "  ArgoCD UI: http://${ARGOCD_HOST}"
   echo "  Access requires a VPN peer address in ${VPN_SUBNET}."
 else
   echo ""
