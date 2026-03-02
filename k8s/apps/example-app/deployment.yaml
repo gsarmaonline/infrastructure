@@ -4,6 +4,9 @@ kind: Deployment
 metadata:
   name: example-app
   namespace: example-app
+  annotations:
+    # Wave 3: after ExternalSecret (wave 2) so the secret exists before pod starts
+    argocd.argoproj.io/sync-wave: "3"
   labels:
     app: example-app
 spec:

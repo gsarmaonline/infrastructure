@@ -138,9 +138,34 @@ info "Running init.sh — this takes ~5 minutes…"
 vm_exec "NODE_IP=${NODE_IP} bash /root/infrastructure/setup/init.sh"
 ok "init.sh complete"
 
+# ── 5b. Bootstrap system apps (ESO + Infisical) ──────────────────────────────
+echo ""
+echo "[ 5 ] Bootstrap system apps (ESO + Infisical)"
+info "Applying External Secrets Operator ArgoCD Application…"
+vm_kubectl apply -f /root/infrastructure/k8s/system/external-secrets/application.yaml
+info "Applying Infisical system ArgoCD Application…"
+vm_kubectl apply -f /root/infrastructure/k8s/system/infisical/application.yaml
+ok "System apps registered with ArgoCD"
+
+info "Waiting for external-secrets namespace (ArgoCD syncs it — up to 3 min)…"
+for i in $(seq 1 36); do
+  vm_kubectl get namespace external-secrets &>/dev/null && break
+  sleep 5
+done
+vm_kubectl get namespace external-secrets &>/dev/null || fail "external-secrets namespace not created after 3 min"
+ok "external-secrets namespace ready"
+
+info "Waiting for infisical namespace (ArgoCD syncs it — up to 3 min)…"
+for i in $(seq 1 36); do
+  vm_kubectl get namespace infisical &>/dev/null && break
+  sleep 5
+done
+vm_kubectl get namespace infisical &>/dev/null || fail "infisical namespace not created after 3 min"
+ok "infisical namespace ready"
+
 # ── 6. Self-signed ClusterIssuer for TLS ─────────────────────────────────────
 echo ""
-echo "[ 5 ] Self-signed TLS (local replacement for Let's Encrypt)"
+echo "[ 6 ] Self-signed TLS (local replacement for Let's Encrypt)"
 ISSUER_MANIFEST="$(mktemp /tmp/selfsigned-XXXXXX.yaml)"
 cat > "${ISSUER_MANIFEST}" <<'EOF'
 apiVersion: cert-manager.io/v1
@@ -168,7 +193,7 @@ fi
 
 # ── 7. Infisical bootstrap secrets ───────────────────────────────────────────
 echo ""
-echo "[ 6 ] Infisical bootstrap secrets"
+echo "[ 7 ] Infisical bootstrap secrets"
 
 # infisical-secrets: encryption keys read by the Infisical app pod at startup.
 # ENCRYPTION_KEY must be exactly 32 chars (openssl rand -hex 16 = 32 hex chars).
@@ -196,7 +221,7 @@ ok "Stub secret applied"
 
 # ── 8. Verify ─────────────────────────────────────────────────────────────────
 echo ""
-echo "[ 7 ] Verify"
+echo "[ 8 ] Verify"
 info "Waiting 30s for ArgoCD to complete initial sync…"
 sleep 30
 vm_exec "NODE_IP=${NODE_IP} bash /root/infrastructure/setup/verify.sh" || true
