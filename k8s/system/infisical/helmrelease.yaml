@@ -57,7 +57,6 @@ spec:
           # Generate with: openssl rand -hex 32
           # TODO: replace these with references to a pre-created Kubernetes Secret
           #       using envFrom.secretRef once bootstrapped.
-          kubeSecretRef: ""  # leave blank to use inline env vars below
           env:
             ENCRYPTION_KEY: "c5f6f28ba6bb1523c4c7cb839edeffb9c17d5de1224547de581e6ee22fb5c09d"
             AUTH_SECRET: "afb5eae3bd6e2537992aa186b281d00c8c1f47f764b14efeceb9dfa4ac111a97"
