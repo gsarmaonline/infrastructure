@@ -123,18 +123,7 @@ ok "Repo at /root/infrastructure"
 # ── 4. Patch placeholder secrets (local only — never committed) ───────────────
 echo ""
 echo "[ 3 ] Generate ephemeral secrets"
-info "Patching helmrelease.yaml with random ENCRYPTION_KEY / AUTH_SECRET / DB_PASSWORD…"
-vm_exec "
-  HELMRELEASE=/root/infrastructure/k8s/system/infisical/helmrelease.yaml
-  ENC_KEY=\$(openssl rand -hex 32)
-  AUTH_KEY=\$(openssl rand -hex 32)
-  DB_PASS=\$(openssl rand -base64 24 | tr -d '/=+' | head -c 32)
-
-  sed -i \"s|ENCRYPTION_KEY: \\\"REPLACE_ME_32_CHAR_HEX\\\"|ENCRYPTION_KEY: \\\"\${ENC_KEY}\\\"|\" \${HELMRELEASE}
-  sed -i \"s|AUTH_SECRET: \\\"REPLACE_ME_32_CHAR_HEX\\\"|AUTH_SECRET: \\\"\${AUTH_KEY}\\\"|\" \${HELMRELEASE}
-  sed -i \"s|REPLACE_DB_PASSWORD|\${DB_PASS}|g\" \${HELMRELEASE}
-  echo 'Patched.'
-"
+info "Patching Let's Encrypt email placeholder…"
 
 info "Patching Let's Encrypt email placeholder…"
 vm_exec "sed -i 's|you@example.com|local-test@local.dev|g' \
@@ -177,9 +166,25 @@ else
   warn "    -n example-app cert-manager.io/cluster-issuer=selfsigned --overwrite"
 fi
 
-# ── 7. Stub Infisical Machine Identity credentials ────────────────────────────
+# ── 7. Infisical bootstrap secrets ───────────────────────────────────────────
 echo ""
-echo "[ 6 ] Infisical credentials stub"
+echo "[ 6 ] Infisical bootstrap secrets"
+
+# infisical-secrets: encryption keys read by the Infisical app pod at startup.
+# ENCRYPTION_KEY must be exactly 32 chars (openssl rand -hex 16 = 32 hex chars).
+info "Creating infisical-secrets with random encryption keys…"
+vm_exec "
+  ENC_KEY=\$(openssl rand -hex 16)
+  AUTH_KEY=\$(openssl rand -hex 16)
+  kubectl create secret generic infisical-secrets -n infisical \
+    --from-literal=ENCRYPTION_KEY=\${ENC_KEY} \
+    --from-literal=AUTH_SECRET=\${AUTH_KEY} \
+    --dry-run=client -o yaml | kubectl apply -f -
+  echo 'infisical-secrets created'
+"
+ok "infisical-secrets created"
+
+# infisical-credentials: ESO Machine Identity credentials — placeholder for local.
 warn "Creating placeholder infisical-credentials so ESO doesn't error on a missing secret."
 warn "Replace with real values to enable secret sync (see cluster-secret-store.yaml)."
 vm_kubectl create secret generic infisical-credentials \
