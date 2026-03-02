@@ -21,6 +21,14 @@ spec:
           image: nginx:stable-alpine
           ports:
             - containerPort: 80
+          # Consume secrets injected by ESO:
+          #   global-secrets     → ClusterExternalSecret in k8s/apps/_global/
+          #   example-app-secrets → ExternalSecret in k8s/apps/example-app/
+          envFrom:
+            - secretRef:
+                name: global-secrets
+            - secretRef:
+                name: example-app-secrets
           resources:
             requests:
               cpu: "50m"

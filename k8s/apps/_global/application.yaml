@@ -1,0 +1,35 @@
+---
+# ArgoCD Application: global secrets injected into every opted-in namespace.
+#
+# The app-of-apps (k8s/system/argocd/app-of-apps.yaml) recurses k8s/apps/ and
+# discovers this file, creating this Application automatically.
+#
+# This Application syncs the k8s/apps/_global/ directory, which contains the
+# ClusterExternalSecret that pushes "global-secrets" into every namespace
+# labelled with:  secrets.infisical.com/inject-global: "true"
+#
+# TODO: update repoURL to your GitHub repo URL.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: global-secrets
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    # TODO: update repoURL to your GitHub repo URL
+    repoURL: https://github.com/YOUR_ORG/YOUR_REPO.git
+    targetRevision: main
+    path: k8s/apps/_global
+  destination:
+    server: https://kubernetes.default.svc
+    # ClusterExternalSecret is cluster-scoped; namespace is ignored for it
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -36,11 +36,22 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
 │
 └── k8s/                    # Kubernetes manifests (synced by ArgoCD)
     ├── system/
-    │   └── argocd/
-    │       ├── install.yaml        # ArgoCD namespace
-    │       └── app-of-apps.yaml    # ArgoCD Application watching k8s/apps/
+    │   ├── argocd/
+    │   │   ├── install.yaml        # ArgoCD namespace
+    │   │   └── app-of-apps.yaml    # ArgoCD Application watching k8s/apps/
+    │   ├── external-secrets/       # External Secrets Operator (ESO)
+    │   │   ├── application.yaml    # ArgoCD Application (Helm install)
+    │   │   └── install.yaml        # ESO namespace
+    │   └── infisical/              # Self-hosted Infisical secret manager
+    │       ├── application.yaml    # Parent ArgoCD Application (syncs directory)
+    │       ├── namespace.yaml      # Infisical namespace
+    │       ├── helmrelease.yaml    # Nested ArgoCD App: Infisical Helm chart + Postgres + Redis
+    │       └── cluster-secret-store.yaml  # ESO ClusterSecretStore → Infisical
     └── apps/
-        └── example-app/           # Example app (deployment, service, ingress)
+        ├── _global/                # Global secrets injected into every opted-in namespace
+        │   ├── application.yaml    # ArgoCD Application
+        │   └── cluster-external-secret.yaml
+        └── example-app/           # Example app (deployment, service, ingress, secrets)
 ```
 
 ## Node Setup
@@ -70,6 +81,36 @@ Each app is routed by hostname via Traefik (k3s built-in). Set a unique `host:` 
 
 **Before first use:** update `repoURL` in `k8s/system/argocd/app-of-apps.yaml` and each `application.yaml` to point at this repo.
 
+## Secret Management
+
+Secrets are managed with [External Secrets Operator](https://external-secrets.io) (ESO) pulling from a self-hosted [Infisical](https://infisical.com) instance running inside the cluster.
+
+**Secret scopes:**
+- **Global secrets** — a `ClusterExternalSecret` in `k8s/apps/_global/` injects a `global-secrets` Kubernetes Secret into every namespace labelled `secrets.infisical.com/inject-global: "true"`.
+- **App-specific secrets** — an `ExternalSecret` per app namespace (e.g. `k8s/apps/example-app/external-secret.yaml`) injects only that app's secrets.
+
+**Bootstrap steps (one-time):**
+
+```bash
+# 1. Apply ESO and Infisical system apps (edit repoURL TODOs first)
+kubectl apply -f k8s/system/external-secrets/application.yaml
+kubectl apply -f k8s/system/infisical/application.yaml
+
+# 2. Fill in ENCRYPTION_KEY, AUTH_SECRET, DB password in helmrelease.yaml, then:
+#    Create a Machine Identity in the Infisical UI → Project Settings → Machine Identities
+kubectl create secret generic infisical-credentials \
+  -n external-secrets \
+  --from-literal=clientId=<id> \
+  --from-literal=clientSecret=<secret>
+
+# 3. Update projectSlug / envSlug TODOs in cluster-secret-store.yaml
+
+# 4. Opt namespaces into global secrets
+kubectl label namespace example-app secrets.infisical.com/inject-global=true
+```
+
+Apps consume secrets via `envFrom` in their Deployment — see `k8s/apps/example-app/deployment.yaml` for the pattern.
+
 ## Usage
 
 Each manifest directory contains a `vars.tfvars` file for environment-specific values. To deploy:
@@ -82,4 +123,3 @@ terraform apply -var-file=vars.tfvars
 
 # todo
 - vpn based ssh access
-- secret manager

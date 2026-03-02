@@ -1,0 +1,38 @@
+---
+# ArgoCD Application: syncs the k8s/system/infisical/ directory.
+#
+# This is the parent "app-of-apps" entry for Infisical. When ArgoCD applies
+# this directory it will discover and apply:
+#   - namespace.yaml        → creates the infisical namespace
+#   - helmrelease.yaml      → nested ArgoCD Application that deploys the Helm chart
+#   - cluster-secret-store.yaml → ESO ClusterSecretStore pointing to Infisical
+#
+# Bootstrap: apply this file once to register the Infisical system app with ArgoCD.
+#   kubectl apply -f k8s/system/infisical/application.yaml
+#
+# TODO: update repoURL to your GitHub repo URL (same value as in app-of-apps.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infisical-system
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    # TODO: update repoURL to your GitHub repo URL
+    repoURL: https://github.com/YOUR_ORG/YOUR_REPO.git
+    targetRevision: main
+    path: k8s/system/infisical
+  destination:
+    server: https://kubernetes.default.svc
+    # Cluster-scoped and argocd-namespace resources land here;
+    # the nested helmrelease.yaml Application sets its own destination.
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

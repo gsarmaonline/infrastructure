@@ -1,0 +1,13 @@
+---
+# Namespace for the External Secrets Operator controller and webhook pods.
+# The ArgoCD Application (application.yaml) also sets CreateNamespace=true,
+# so this manifest is a belt-and-suspenders guarantee that the namespace exists
+# before any other resources reference it (e.g., the infisical-credentials Secret
+# used by ClusterSecretStore must live here).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels:
+    # Keep ESO's own namespace out of the global-secrets injection loop
+    app.kubernetes.io/managed-by: argocd
