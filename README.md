@@ -32,6 +32,7 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
 │
 ├── setup/                  # Node initialization scripts
 │   ├── init.sh             # k3s server install + ArgoCD bootstrap (runs via user_data)
+│   ├── local-setup.sh      # Local dev setup — spins up a Multipass VM and bootstraps it
 │   ├── verify.sh           # Post-bootstrap health check (node, ArgoCD, certs, ESO)
 │   ├── new-app.sh          # Scaffold a new app from the example-app template
 │   ├── worker-init.sh      # k3s agent join script for worker nodes
@@ -65,7 +66,34 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
 
 ## Node Setup
 
-### Server node
+### Local development (Multipass VM)
+
+Test the full stack locally before deploying to a cloud VM:
+
+```bash
+# macOS
+brew install multipass
+
+# Linux
+snap install multipass
+
+# Run — creates a VM, bootstraps k3s + ArgoCD, applies a self-signed TLS issuer
+bash setup/local-setup.sh
+
+# Optional overrides
+VM_NAME=my-test VM_CPUS=4 VM_MEMORY=8G bash setup/local-setup.sh
+```
+
+The script handles everything: VM creation, repo transfer, secret generation,
+`init.sh`, a self-signed `ClusterIssuer` (replacing Let's Encrypt), and a
+health check. ArgoCD UI and example-app URLs are printed at the end.
+
+**Local limitations vs production:**
+- TLS uses self-signed certs (browser will warn — expected)
+- Infisical secret sync needs real Machine Identity credentials to work
+- VPN firewall is not applied
+
+### Server node (cloud)
 All EC2 instances and DigitalOcean Droplets run `setup/init.sh` on first boot via `user_data` (cloud-init). This installs k3s in server mode and bootstraps ArgoCD.
 
 ### Verify bootstrap
