@@ -5,19 +5,26 @@
 # DNS: point example-app.example.com A record → node public IP.
 # For testing without a domain: use example-app.<node-ip>.nip.io as the host.
 #
-# To add HTTPS later, add cert-manager and uncomment the tls block below.
+# TLS: cert-manager requests a Let's Encrypt certificate automatically.
+#   - Start with letsencrypt-staging to verify the pipeline (staging certs are
+#     not trusted by browsers but do not consume production rate limits).
+#   - Once a staging cert is confirmed issued, change the annotation value to
+#     letsencrypt-prod and delete the old Certificate object to re-issue:
+#       kubectl delete certificate -n example-app example-app-tls
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: example-app
   namespace: example-app
   annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # Change to letsencrypt-prod once staging cert is confirmed working.
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
 spec:
-  # tls:                               # uncomment when cert-manager is set up
-  #   - hosts:
-  #       - example-app.example.com
-  #     secretName: example-app-tls
+  tls:
+    - hosts:
+        - example-app.example.com    # TODO: replace with your subdomain
+      secretName: example-app-tls
   rules:
     - host: example-app.example.com    # TODO: replace with your subdomain
       http:

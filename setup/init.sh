@@ -1,12 +1,20 @@
 #!/bin/bash
 # k3s server node initialization script
 # Installs k3s in server mode and bootstraps ArgoCD after the cluster is ready.
+#
+# Optional VPN-gated firewall + ArgoCD ingress:
+#   Set VPN_SUBNET before running (or export it from user_data) to enable:
+#     - SSH and k3s API restricted to VPN peers (100.64.0.0/10 by default)
+#     - ArgoCD UI exposed via Traefik with a VPN IP-allowlist
+#   Compatible with NordVPN Meshnet and Tailscale (both use 100.64.0.0/10).
+#   Example: VPN_SUBNET=100.64.0.0/10 bash init.sh
 
 set -euo pipefail
 
 ARGOCD_VERSION="v2.14.2"
 ARGOCD_INSTALL_URL="https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
 REPO_K8S_DIR="/root/k8s"
+SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "Starting k3s server setup..."
 
@@ -40,6 +48,44 @@ kubectl wait --for=condition=available deployment/argocd-server \
 # ── 4. Apply app-of-apps ──────────────────────────────────────────────────────
 echo "Applying ArgoCD app-of-apps..."
 kubectl apply -f "${REPO_K8S_DIR}/system/argocd/app-of-apps.yaml"
+
+# ── 5. Install cert-manager ──────────────────────────────────────────────────
+echo "Installing cert-manager..."
+kubectl apply -f "${REPO_K8S_DIR}/system/cert-manager/application.yaml"
+
+echo "Waiting for cert-manager to be ready (up to 3 min)..."
+kubectl wait --for=condition=available deployment/cert-manager \
+  -n cert-manager --timeout=180s
+
+echo "Applying ClusterIssuers..."
+kubectl apply -f "${REPO_K8S_DIR}/system/cert-manager/cluster-issuers.yaml"
+
+# ── 6. VPN-gated firewall + ArgoCD ingress (optional) ─────────────────────────
+if [ -n "${VPN_SUBNET:-}" ]; then
+  echo ""
+  echo "VPN_SUBNET is set (${VPN_SUBNET}). Configuring VPN-gated access..."
+
+  # Firewall: restrict SSH + k3s API to VPN peers
+  VPN_SUBNET="${VPN_SUBNET}" bash "${SETUP_DIR}/vpn-firewall.sh"
+
+  # ArgoCD: run insecure so Traefik can apply the IP-allowlist middleware
+  kubectl apply -f "${REPO_K8S_DIR}/system/argocd/argocd-params.yaml"
+  kubectl rollout restart deployment/argocd-server -n argocd
+  kubectl rollout status  deployment/argocd-server -n argocd --timeout=120s
+
+  # Expose ArgoCD UI via Traefik with VPN IP-allowlist
+  kubectl apply -f "${REPO_K8S_DIR}/system/argocd/vpn-middleware.yaml"
+  kubectl apply -f "${REPO_K8S_DIR}/system/argocd/ingress.yaml"
+
+  echo ""
+  echo "VPN-gated access configured."
+  echo "  ArgoCD UI: http://argocd.example.com  (replace host in ingress.yaml)"
+  echo "  Access requires a VPN peer address in ${VPN_SUBNET}."
+else
+  echo ""
+  echo "VPN_SUBNET not set — skipping firewall hardening and ArgoCD ingress."
+  echo "  Re-run with VPN_SUBNET=100.64.0.0/10 to enable VPN-gated access."
+fi
 
 echo ""
 echo "k3s + ArgoCD setup complete."

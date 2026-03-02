@@ -1,0 +1,31 @@
+---
+# ArgoCD Application: installs cert-manager via the Jetstack Helm chart.
+#
+# Bootstrap: apply this file once to register cert-manager with ArgoCD.
+#   kubectl apply -f k8s/system/cert-manager/application.yaml
+#
+# cert-manager pods must be running before ClusterIssuers can be created.
+# Apply cluster-issuers.yaml only after confirming all three pods are Ready:
+#   kubectl get pods -n cert-manager
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    # Pin to a minor version range; bump explicitly to control upgrades.
+    targetRevision: "v1.17.x"
+    helm:
+      values: |
+        # Install all cert-manager CRDs (Certificate, ClusterIssuer, etc.)
+        installCRDs: true
+
+        global:
+          leaderElection:
+            namespace: cert-manager

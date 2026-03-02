@@ -1,0 +1,45 @@
+---
+# Ingress for the ArgoCD UI.
+#
+# Traffic flow:
+#   browser (VPN peer) → Traefik :80 → vpn-allowlist middleware
+#                      → argocd-server:80 (insecure / plain HTTP)
+#
+# Non-VPN clients receive a 403 Forbidden from the middleware.
+#
+# The VPN tunnel already encrypts traffic end-to-end, so plain HTTP between
+# Traefik and the browser is acceptable when accessed exclusively over VPN.
+#
+# Why no HTTPS via HTTP-01 here:
+#   Let's Encrypt HTTP-01 challenges require the verification server to reach
+#   http://<domain>/.well-known/acme-challenge/... from the public internet.
+#   This Ingress is protected by the vpn-allowlist middleware, so Let's
+#   Encrypt's servers are blocked and HTTP-01 cannot complete.
+#   To add HTTPS on a VPN-gated domain, use DNS-01 with a supported DNS
+#   provider (Route53, Cloudflare, etc.) instead of HTTP-01.
+#
+# Replace argocd.example.com with your actual domain or the VPN IP of the node.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    # Route via the plain-HTTP entrypoint (port 80).
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    # Apply the VPN IP-allowlist defined in vpn-middleware.yaml.
+    # Format: <namespace>-<middleware-name>@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: argocd-vpn-allowlist@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: argocd.example.com  # TODO: replace with your domain or VPN IP
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: argocd-server
+                port:
+                  number: 80

@@ -1,0 +1,53 @@
+---
+# ClusterIssuers for Let's Encrypt via HTTP-01 challenge.
+#
+# IMPORTANT — HTTP-01 limitation:
+#   Let's Encrypt's verification servers must reach
+#   http://<domain>/.well-known/acme-challenge/... from the public internet.
+#   VPN-gated Ingresses (e.g., ArgoCD) cannot receive HTTP-01 challenges —
+#   use DNS-01 with a supported DNS provider for those domains instead.
+#
+# Bootstrap order:
+#   1. Apply cert-manager Application and wait for all three pods to be Ready.
+#   2. Apply this file:
+#        kubectl apply -f k8s/system/cert-manager/cluster-issuers.yaml
+#   3. Verify: kubectl get clusterissuers
+#
+# Workflow:
+#   - Use letsencrypt-staging first to verify the pipeline without hitting
+#     Let's Encrypt production rate limits (staging certs are not trusted by
+#     browsers but are otherwise identical in behavior).
+#   - Once a staging cert is confirmed issued, switch the Ingress annotation
+#     to letsencrypt-prod and delete the staging Certificate object so
+#     cert-manager re-issues from production Let's Encrypt.
+#       kubectl delete certificate -n <namespace> <name>
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: you@example.com  # TODO: replace with your email
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: you@example.com  # TODO: replace with your email
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik

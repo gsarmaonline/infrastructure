@@ -1,0 +1,27 @@
+---
+# Traefik Middleware: restrict traffic to VPN peers.
+#
+# Allowlisted CIDRs cover both NordVPN Meshnet and Tailscale —
+# both use 100.64.0.0/10 (RFC 6598 CGNAT). Switching between providers
+# requires no changes to this file.
+#
+# Traefik v3 (default in recent k3s releases):
+#   API version : traefik.io/v1alpha1
+#   Kind        : IPAllowList
+#
+# Traefik v2 fallback (older k3s):
+#   API version : traefik.containo.us/v1alpha1
+#   Kind        : IPWhiteList  (field: ipStrategy instead of sourceRange → same values)
+#
+# To reference this middleware from another namespace use the cross-namespace form:
+#   traefik.ingress.kubernetes.io/router.middlewares: argocd-vpn-allowlist@kubernetescrd
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: vpn-allowlist
+  namespace: argocd
+spec:
+  ipAllowList:
+    sourceRange:
+      - 100.64.0.0/10  # NordVPN Meshnet + Tailscale (RFC 6598 CGNAT)
+      - 127.0.0.1/32   # localhost

@@ -1,0 +1,16 @@
+---
+# ArgoCD server parameters: run in insecure (plain HTTP) mode.
+#
+# With insecure mode enabled, argocd-server serves HTTP on port 80 instead of
+# terminating TLS itself. Traefik then acts as the TLS terminator and applies
+# the VPN IP-allowlist middleware before forwarding traffic to argocd-server.
+#
+# The argocd-server pod must be restarted after this ConfigMap is applied:
+#   kubectl rollout restart deployment/argocd-server -n argocd
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+data:
+  server.insecure: "true"
