@@ -32,7 +32,8 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
 │
 ├── setup/                  # Node initialization scripts
 │   ├── init.sh             # k3s server install + ArgoCD bootstrap (runs via user_data)
-│   ├── local-setup.sh      # Local dev setup — spins up a Multipass VM and bootstraps it
+│   ├── local-setup.sh      # Local dev setup — spins up a Lima VM and bootstraps it
+│   ├── lima.yaml           # Lima VM config (Ubuntu 22.04, vzNAT networking)
 │   ├── verify.sh           # Post-bootstrap health check (node, ArgoCD, certs, ESO)
 │   ├── new-app.sh          # Scaffold a new app from the example-app template
 │   ├── worker-init.sh      # k3s agent join script for worker nodes
@@ -66,27 +67,25 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
 
 ## Node Setup
 
-### Local development (Multipass VM)
+### Local development (Lima VM)
 
-Test the full stack locally before deploying to a cloud VM:
+Test the full stack locally before deploying to a cloud VM.
+Requires macOS 13 (Ventura) or later.
 
 ```bash
-# macOS
-brew install multipass
-
-# Linux
-snap install multipass
+brew install lima
 
 # Run — creates a VM, bootstraps k3s + ArgoCD, applies a self-signed TLS issuer
 bash setup/local-setup.sh
 
 # Optional overrides
-VM_NAME=my-test VM_CPUS=4 VM_MEMORY=8G bash setup/local-setup.sh
+VM_NAME=my-test VM_CPUS=4 VM_MEMORY=8GiB bash setup/local-setup.sh
 ```
 
-The script handles everything: VM creation, repo transfer, secret generation,
-`init.sh`, a self-signed `ClusterIssuer` (replacing Let's Encrypt), and a
-health check. ArgoCD UI and example-app URLs are printed at the end.
+The script handles everything: VM creation (Ubuntu 22.04, vzNAT networking),
+repo transfer, ephemeral secret generation, `init.sh`, a self-signed
+`ClusterIssuer` (replacing Let's Encrypt), and a health check. ArgoCD UI and
+example-app URLs are printed at the end.
 
 **Local limitations vs production:**
 - TLS uses self-signed certs (browser will warn — expected)

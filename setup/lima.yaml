@@ -1,0 +1,29 @@
+# Lima VM configuration for local k3s + ArgoCD testing.
+#
+# Requires macOS 13 (Ventura) or later — uses Apple Virtualization.framework
+# (vmType: vz) with vzNAT networking so the VM gets a routable IP accessible
+# from the host (needed for nip.io hostnames and ArgoCD/app URLs).
+#
+# Used by: setup/local-setup.sh
+# Install Lima: brew install lima
+
+vmType: "vz"
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+
+cpus: 2
+memory: "4GiB"
+disk: "20GiB"
+
+# No host mounts needed — the repo is transferred by local-setup.sh.
+# (Keeping mounts empty avoids accidental writes to your host filesystem.)
+mounts: []
+
+networks:
+  # vzNAT assigns the VM a routable IP (typically 192.168.105.x) reachable
+  # from the host. Required for nip.io hostnames to resolve to the VM.
+  - vzNAT: true

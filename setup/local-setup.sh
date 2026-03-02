@@ -1,5 +1,5 @@
 #!/bin/bash
-# Bootstrap a local k3s cluster inside a Multipass VM.
+# Bootstrap a local k3s cluster inside a Lima VM.
 # Mirrors the production cloud setup as closely as possible.
 #
 # Differences from production:
@@ -9,12 +9,11 @@
 #   - VPN firewall: not applied (no VPN_SUBNET set)
 #
 # Prerequisites:
-#   macOS:  brew install multipass
-#   Linux:  snap install multipass
+#   brew install lima          # macOS 13+ required for vzNAT networking
 #
 # Usage:
 #   bash setup/local-setup.sh
-#   VM_NAME=my-test VM_MEMORY=8G bash setup/local-setup.sh
+#   VM_NAME=my-test VM_CPUS=4 VM_MEMORY=8GiB bash setup/local-setup.sh
 #
 # Re-running is safe — if the VM already exists it is reused.
 
@@ -25,9 +24,11 @@ REPO_ROOT="$(cd "${SETUP_DIR}/.." && pwd)"
 REPO_BASENAME="$(basename "${REPO_ROOT}")"
 
 VM_NAME="${VM_NAME:-infra-local}"
-VM_CPUS="${VM_CPUS:-2}"
-VM_MEMORY="${VM_MEMORY:-4G}"
-VM_DISK="${VM_DISK:-20G}"
+VM_CPUS="${VM_CPUS:-}"       # overrides lima.yaml cpus if set
+VM_MEMORY="${VM_MEMORY:-}"   # overrides lima.yaml memory if set (e.g. 8GiB)
+VM_DISK="${VM_DISK:-}"       # overrides lima.yaml disk if set
+
+LIMA_YAML="${SETUP_DIR}/lima.yaml"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 info()    { echo "  → $*"; }
@@ -36,23 +37,29 @@ warn()    { echo "  ⚠  $*"; }
 fail()    { echo "  ✗ $*" >&2; exit 1; }
 
 # Run a command as root inside the VM
-vm_exec() { multipass exec "${VM_NAME}" -- sudo bash -c "$1"; }
+vm_exec() { limactl exec "${VM_NAME}" -- sudo bash -c "$1"; }
 
 # Run kubectl as root inside the VM
-vm_kubectl() { multipass exec "${VM_NAME}" -- sudo kubectl "$@"; }
+vm_kubectl() { limactl exec "${VM_NAME}" -- sudo kubectl "$@"; }
 
 # ── 0. Check prerequisites ────────────────────────────────────────────────────
 echo ""
 echo "══════════════════════════════════════════"
-echo "  Local Infrastructure Setup"
+echo "  Local Infrastructure Setup (Lima)"
 echo "  VM: ${VM_NAME}"
 echo "══════════════════════════════════════════"
 echo ""
 
-if ! command -v multipass &>/dev/null; then
-  fail "multipass not found. Install with:  brew install multipass  (macOS)  or  snap install multipass  (Linux)"
+if ! command -v limactl &>/dev/null; then
+  fail "limactl not found. Install with: brew install lima"
 fi
-ok "multipass $(multipass version 2>/dev/null | head -1 | awk '{print $NF}')"
+ok "lima $(limactl --version 2>/dev/null | awk '{print $NF}')"
+
+# vzNAT requires macOS 13+
+MACOS_VERSION=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1 || echo "0")
+if [ "${MACOS_VERSION}" -lt 13 ]; then
+  fail "macOS 13 (Ventura) or later required for vzNAT networking. Found: $(sw_vers -productVersion)"
+fi
 
 # Warn if there are uncommitted changes — ArgoCD pulls from git, not local files
 if ! git -C "${REPO_ROOT}" diff --quiet HEAD 2>/dev/null; then
@@ -64,34 +71,35 @@ fi
 
 # ── 1. Create or reuse VM ─────────────────────────────────────────────────────
 echo "[ 1 ] VM"
-VM_STATE=$(multipass info "${VM_NAME}" 2>/dev/null | awk '/^State:/{print $2}' || echo "absent")
+VM_STATUS=$(limactl list --format '{{.Name}} {{.Status}}' 2>/dev/null \
+  | awk "/^${VM_NAME} /{print \$2}" || echo "")
 
-case "${VM_STATE}" in
-  absent)
-    info "Creating VM (${VM_CPUS} vCPU, ${VM_MEMORY} RAM, ${VM_DISK} disk)…"
-    multipass launch \
-      --name    "${VM_NAME}" \
-      --cpus    "${VM_CPUS}" \
-      --memory  "${VM_MEMORY}" \
-      --disk    "${VM_DISK}"
-    ok "VM created"
-    ;;
-  Stopped|stopped)
-    info "Starting stopped VM…"
-    multipass start "${VM_NAME}"
-    ok "VM started"
-    ;;
-  Running|running)
-    ok "VM already running"
-    ;;
-  *)
-    fail "VM is in unexpected state: ${VM_STATE}"
-    ;;
-esac
+if [ -z "${VM_STATUS}" ]; then
+  info "Creating VM from ${LIMA_YAML}…"
+  # Build override args for cpu/memory/disk if the caller set them
+  OVERRIDES=()
+  [ -n "${VM_CPUS}"   ] && OVERRIDES+=(--cpus="${VM_CPUS}")
+  [ -n "${VM_MEMORY}" ] && OVERRIDES+=(--memory="${VM_MEMORY}")
+  [ -n "${VM_DISK}"   ] && OVERRIDES+=(--disk="${VM_DISK}")
+  limactl create --name "${VM_NAME}" "${OVERRIDES[@]}" "${LIMA_YAML}"
+  limactl start "${VM_NAME}"
+  ok "VM created and started"
+elif [ "${VM_STATUS}" = "Stopped" ]; then
+  info "Starting stopped VM…"
+  limactl start "${VM_NAME}"
+  ok "VM started"
+elif [ "${VM_STATUS}" = "Running" ]; then
+  ok "VM already running"
+else
+  fail "VM is in unexpected state: ${VM_STATUS}"
+fi
 
 # ── 2. Resolve VM IP ──────────────────────────────────────────────────────────
-NODE_IP=$(multipass info "${VM_NAME}" | awk '/^IPv4:/{print $2}' | head -1)
-[ -n "${NODE_IP}" ] || fail "Could not read VM IP from multipass info"
+# vzNAT assigns an IP in the 192.168.105.x range; exclude loopback and link-local
+NODE_IP=$(limactl exec "${VM_NAME}" -- \
+  ip -4 addr show | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+  | grep -v '^127\.' | grep -v '^169\.254\.' | head -1)
+[ -n "${NODE_IP}" ] || fail "Could not determine VM IP. Is vzNAT networking working?"
 ok "Node IP: ${NODE_IP}"
 
 # ── 3. Transfer repo ──────────────────────────────────────────────────────────
@@ -99,11 +107,10 @@ echo ""
 echo "[ 2 ] Transfer repo"
 info "Packing…"
 TARBALL="$(mktemp /tmp/infra-XXXXXX.tar.gz)"
-# Exclude .git/objects to keep the tarball small; git remote info is preserved
 tar -czf "${TARBALL}" -C "${REPO_ROOT}/.." "${REPO_BASENAME}"
 
-info "Transferring to VM…"
-multipass transfer "${TARBALL}" "${VM_NAME}:/tmp/infra-src.tar.gz"
+info "Copying to VM…"
+limactl cp "${TARBALL}" "${VM_NAME}:/tmp/infra-src.tar.gz"
 rm -f "${TARBALL}"
 
 info "Extracting…"
@@ -122,13 +129,9 @@ vm_exec "
   AUTH_KEY=\$(openssl rand -hex 32)
   DB_PASS=\$(openssl rand -base64 24 | tr -d '/=+' | head -c 32)
 
-  # Replace the two REPLACE_ME_32_CHAR_HEX occurrences with different values
   sed -i \"s|ENCRYPTION_KEY: \\\"REPLACE_ME_32_CHAR_HEX\\\"|ENCRYPTION_KEY: \\\"\${ENC_KEY}\\\"|\" \${HELMRELEASE}
   sed -i \"s|AUTH_SECRET: \\\"REPLACE_ME_32_CHAR_HEX\\\"|AUTH_SECRET: \\\"\${AUTH_KEY}\\\"|\" \${HELMRELEASE}
-
-  # Replace both occurrences of REPLACE_DB_PASSWORD (connection URI + auth.password)
   sed -i \"s|REPLACE_DB_PASSWORD|\${DB_PASS}|g\" \${HELMRELEASE}
-
   echo 'Patched.'
 "
 
@@ -157,19 +160,20 @@ metadata:
 spec:
   selfSigned: {}
 EOF
-multipass transfer "${ISSUER_MANIFEST}" "${VM_NAME}:/tmp/selfsigned-issuer.yaml"
+limactl cp "${ISSUER_MANIFEST}" "${VM_NAME}:/tmp/selfsigned-issuer.yaml"
 rm -f "${ISSUER_MANIFEST}"
 vm_exec "kubectl apply -f /tmp/selfsigned-issuer.yaml"
 
-# Patch example-app ingress annotation to use self-signed issuer
+# Patch example-app ingress to use selfsigned instead of letsencrypt-staging
 # (Let's Encrypt HTTP-01 cannot validate private nip.io hostnames)
 if vm_kubectl get ingress example-app -n example-app &>/dev/null; then
   vm_kubectl annotate ingress example-app -n example-app \
     cert-manager.io/cluster-issuer=selfsigned --overwrite
   ok "example-app ingress patched → selfsigned issuer"
 else
-  warn "example-app ingress not synced yet — patch it manually after ArgoCD syncs:"
-  warn "  kubectl annotate ingress example-app -n example-app cert-manager.io/cluster-issuer=selfsigned --overwrite"
+  warn "example-app ingress not synced yet — patch it manually once ArgoCD syncs:"
+  warn "  limactl exec ${VM_NAME} -- sudo kubectl annotate ingress example-app \\"
+  warn "    -n example-app cert-manager.io/cluster-issuer=selfsigned --overwrite"
 fi
 
 # ── 7. Stub Infisical Machine Identity credentials ────────────────────────────
@@ -190,7 +194,6 @@ echo "[ 7 ] Verify"
 info "Waiting 30s for ArgoCD to complete initial sync…"
 sleep 30
 vm_exec "NODE_IP=${NODE_IP} bash /root/infrastructure/setup/verify.sh" || true
-# verify.sh exits non-zero when checks fail; we continue to print the summary
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 ARGOCD_PASSWORD=$(vm_exec \
@@ -215,11 +218,11 @@ echo "  Scaffold a new app:"
 echo "    APP_NAME=my-api IMAGE=nginx:alpine bash setup/new-app.sh"
 echo ""
 echo "  Useful commands:"
-echo "    multipass shell ${VM_NAME}                      # open a shell in the VM"
-echo "    multipass exec ${VM_NAME} -- sudo kubectl get pods -A"
-echo "    NODE_IP=${NODE_IP} bash setup/verify.sh         # re-run health check"
-echo "    multipass stop ${VM_NAME}                       # pause VM"
-echo "    multipass delete ${VM_NAME} --purge             # destroy VM"
+echo "    limactl shell ${VM_NAME}                           # open a shell in the VM"
+echo "    limactl exec ${VM_NAME} -- sudo kubectl get pods -A"
+echo "    NODE_IP=${NODE_IP} bash setup/verify.sh            # re-run health check"
+echo "    limactl stop ${VM_NAME}                            # pause VM"
+echo "    limactl delete --force ${VM_NAME}                  # destroy VM"
 echo ""
 echo "  Known limitations (local only):"
 echo "    ✗ Let's Encrypt — replaced with self-signed (browser cert warning)"
