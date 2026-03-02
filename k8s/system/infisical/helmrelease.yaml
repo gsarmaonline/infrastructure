@@ -30,7 +30,7 @@ spec:
     repoURL: https://dl.cloudsmith.io/public/infisical/helm-charts/helm/charts/
     chart: infisical-standalone
     # Pin to a minor version; check https://github.com/Infisical/helm-charts for latest.
-    targetRevision: "0.8.x"
+    targetRevision: "1.7.x"
     helm:
       values: |
         infisical:
@@ -59,10 +59,10 @@ spec:
           #       using envFrom.secretRef once bootstrapped.
           kubeSecretRef: ""  # leave blank to use inline env vars below
           env:
-            ENCRYPTION_KEY: "REPLACE_ME_32_CHAR_HEX"
-            AUTH_SECRET: "REPLACE_ME_32_CHAR_HEX"
+            ENCRYPTION_KEY: "c5f6f28ba6bb1523c4c7cb839edeffb9c17d5de1224547de581e6ee22fb5c09d"
+            AUTH_SECRET: "afb5eae3bd6e2537992aa186b281d00c8c1f47f764b14efeceb9dfa4ac111a97"
             # Internal Postgres connection (matches postgresql section below)
-            DB_CONNECTION_URI: "postgresql://infisical:REPLACE_DB_PASSWORD@infisical-postgresql:5432/infisical"
+            DB_CONNECTION_URI: "postgresql://infisical:local-dev-password@infisical-postgresql:5432/infisical"
             # Internal Redis connection
             REDIS_URL: "redis://infisical-redis-master:6379"
             # Set the site URL (update if you expose Infisical via Ingress)
@@ -74,7 +74,7 @@ spec:
             username: infisical
             database: infisical
             # TODO: replace with a reference to an existingSecret for production
-            password: "REPLACE_DB_PASSWORD"
+            password: "local-dev-password"
           primary:
             persistence:
               enabled: true
