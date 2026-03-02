@@ -19,6 +19,9 @@ spec:
     path: k8s/apps
     directory:
       recurse: true
+      # Only discover application.yaml files — prevents app-of-apps from also
+      # managing workload manifests that child apps already own (SharedResourceWarning).
+      include: '**/application.yaml'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
