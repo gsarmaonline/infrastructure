@@ -47,10 +47,10 @@ spec:
           resources:
             requests:
               cpu: "100m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
               memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
 
           # Environment variables injected into the Infisical pod.
           # ENCRYPTION_KEY and AUTH_SECRET must be strong random values.
