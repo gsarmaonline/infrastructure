@@ -36,7 +36,10 @@ spec:
     namespace: argocd
   syncPolicy:
     automated:
-      prune: true
+      # prune: false — this Application excludes its own application.yaml from
+      # the directory sync (to avoid a self-reference loop). With prune: true,
+      # ArgoCD would treat the Application itself as an orphan and delete it.
+      prune: false
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
