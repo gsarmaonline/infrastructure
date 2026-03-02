@@ -1,11 +1,15 @@
 ---
-# ArgoCD Application: syncs the k8s/system/infisical/ directory.
+# ArgoCD Application: syncs the k8s/system/infisical/manifests/ subdirectory.
 #
 # This is the parent "app-of-apps" entry for Infisical. When ArgoCD applies
 # this directory it will discover and apply:
-#   - namespace.yaml        → creates the infisical namespace
-#   - helmrelease.yaml      → nested ArgoCD Application that deploys the Helm chart
-#   - cluster-secret-store.yaml → ESO ClusterSecretStore pointing to Infisical
+#   - manifests/namespace.yaml          → creates the infisical namespace
+#   - manifests/helmrelease.yaml        → nested ArgoCD Application that deploys the Helm chart
+#   - manifests/cluster-secret-store.yaml → ESO ClusterSecretStore pointing to Infisical
+#
+# By pointing to the 'manifests/' subdirectory (not the parent directory), this
+# Application does not watch itself — the self-reference loop is eliminated cleanly,
+# and prune: true is safe to use.
 #
 # Bootstrap: apply this file once to register the Infisical system app with ArgoCD.
 #   kubectl apply -f k8s/system/infisical/application.yaml
@@ -24,11 +28,8 @@ spec:
     # TODO: update repoURL to your GitHub repo URL
     repoURL: https://github.com/gsarmaonline/infrastructure.git
     targetRevision: main
-    path: k8s/system/infisical
-    directory:
-      # Exclude this file itself — ArgoCD syncing application.yaml would create
-      # a self-reference loop and fail with a resourceVersion conflict.
-      exclude: 'application.yaml'
+    # Point to manifests/ subdirectory so this Application doesn't watch itself.
+    path: k8s/system/infisical/manifests
   destination:
     server: https://kubernetes.default.svc
     # Cluster-scoped and argocd-namespace resources land here;
@@ -36,10 +37,7 @@ spec:
     namespace: argocd
   syncPolicy:
     automated:
-      # prune: false — this Application excludes its own application.yaml from
-      # the directory sync (to avoid a self-reference loop). With prune: true,
-      # ArgoCD would treat the Application itself as an orphan and delete it.
-      prune: false
+      prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
