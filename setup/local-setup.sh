@@ -37,10 +37,10 @@ warn()    { echo "  ⚠  $*"; }
 fail()    { echo "  ✗ $*" >&2; exit 1; }
 
 # Run a command as root inside the VM
-vm_exec() { limactl exec "${VM_NAME}" -- sudo bash -c "$1"; }
+vm_exec() { limactl shell "${VM_NAME}" sudo bash -c "$1"; }
 
 # Run kubectl as root inside the VM
-vm_kubectl() { limactl exec "${VM_NAME}" -- sudo kubectl "$@"; }
+vm_kubectl() { limactl shell "${VM_NAME}" sudo kubectl "$@"; }
 
 # ── 0. Check prerequisites ────────────────────────────────────────────────────
 echo ""
@@ -97,7 +97,7 @@ fi
 
 # ── 2. Resolve VM IP ──────────────────────────────────────────────────────────
 # vzNAT assigns an IP in the 192.168.105.x range; exclude loopback and link-local
-NODE_IP=$(limactl exec "${VM_NAME}" -- \
+NODE_IP=$(limactl shell "${VM_NAME}" \
   ip -4 addr show | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
   | grep -v '^127\.' | grep -v '^169\.254\.' | head -1)
 [ -n "${NODE_IP}" ] || fail "Could not determine VM IP. Is vzNAT networking working?"
@@ -173,7 +173,7 @@ if vm_kubectl get ingress example-app -n example-app &>/dev/null; then
   ok "example-app ingress patched → selfsigned issuer"
 else
   warn "example-app ingress not synced yet — patch it manually once ArgoCD syncs:"
-  warn "  limactl exec ${VM_NAME} -- sudo kubectl annotate ingress example-app \\"
+  warn "  limactl shell ${VM_NAME} sudo kubectl annotate ingress example-app \\"
   warn "    -n example-app cert-manager.io/cluster-issuer=selfsigned --overwrite"
 fi
 
@@ -220,7 +220,7 @@ echo "    APP_NAME=my-api IMAGE=nginx:alpine bash setup/new-app.sh"
 echo ""
 echo "  Useful commands:"
 echo "    limactl shell ${VM_NAME}                           # open a shell in the VM"
-echo "    limactl exec ${VM_NAME} -- sudo kubectl get pods -A"
+echo "    limactl shell ${VM_NAME} sudo kubectl get pods -A"
 echo "    NODE_IP=${NODE_IP} bash setup/verify.sh            # re-run health check"
 echo "    limactl stop ${VM_NAME}                            # pause VM"
 echo "    limactl delete --force ${VM_NAME}                  # destroy VM"
