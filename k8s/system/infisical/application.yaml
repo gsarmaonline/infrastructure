@@ -25,6 +25,10 @@ spec:
     repoURL: https://github.com/YOUR_ORG/YOUR_REPO.git
     targetRevision: main
     path: k8s/system/infisical
+    directory:
+      # Exclude this file itself — ArgoCD syncing application.yaml would create
+      # a self-reference loop and fail with a resourceVersion conflict.
+      exclude: 'application.yaml'
   destination:
     server: https://kubernetes.default.svc
     # Cluster-scoped and argocd-namespace resources land here;
