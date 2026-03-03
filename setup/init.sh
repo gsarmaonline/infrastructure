@@ -60,6 +60,9 @@ until kubectl get nodes 2>/dev/null | grep -q " Ready"; do
   sleep 5
 done
 echo "k3s node is Ready."
+# Brief pause to let the API server finish internal initialization before
+# we start sending large kubectl apply payloads
+sleep 10
 
 # ── 2. Export node token (worker nodes need this to join) ─────────────────────
 NODE_TOKEN_FILE="/var/lib/rancher/k3s/server/node-token"
