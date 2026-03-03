@@ -69,7 +69,7 @@ brew install lima
 bash setup/local-setup.sh
 
 # Optional overrides
-VM_NAME=my-test VM_CPUS=4 VM_MEMORY=8GiB bash setup/local-setup.sh
+VM_NAME=my-test VM_CPUS=4 VM_MEMORY=8GiB VM_DISK=40GiB bash setup/local-setup.sh
 ```
 
 The script handles everything: VM creation (Ubuntu 22.04, vzNAT networking),
@@ -81,6 +81,7 @@ and a health check. ArgoCD UI and example-app URLs are printed at the end.
 - VPN firewall is not applied
 
 ### Server node (cloud)
+
 EC2 instances and DigitalOcean Droplets use `setup/cloud-init.sh.tpl` as `user_data` via Terraform's `templatefile()`. On first boot, cloud-init clones the repo and runs `init.sh`, which fully bootstraps the cluster: k3s, ArgoCD, cert-manager, and baseline firewall rules.
 
 Pass deployment variables to the Terraform module:
@@ -103,6 +104,7 @@ NODE_IP=1.2.3.4 bash verify.sh   # explicit override
 It checks: k3s node Ready → ArgoCD apps Synced/Healthy → cert-manager + ClusterIssuers → all Certificates → patches the `example-app` ingress to `example-app.<NODE_IP>.nip.io`. Ends with an access summary (ArgoCD URL + admin password).
 
 ### Worker nodes
+
 Worker nodes run `setup/worker-init.sh`, which joins an existing k3s cluster. Pass `K3S_URL` and `K3S_TOKEN` as environment variables in `user_data`:
 
 ```hcl
@@ -112,20 +114,103 @@ user_data = templatefile("setup/worker-init.sh", {
 })
 ```
 
+The token is printed by `init.sh` and stored at `/var/lib/rancher/k3s/server/node-token` on the server node.
+
+## Firewall
+
+`vpn-firewall.sh` is always run by `init.sh` and applies these baseline rules unconditionally:
+
+| Port | Access |
+|---|---|
+| 80, 443 | Public (Traefik ingress) |
+| 6443 | Localhost only (k3s API) |
+| 22 | Open (or VPN-only when `VPN_SUBNET` is set) |
+
+Re-run at any time to change the posture:
+
+```bash
+# Baseline only (SSH open)
+bash setup/vpn-firewall.sh
+
+# Restrict SSH + k3s API to VPN peers
+VPN_SUBNET=100.64.0.0/10 bash setup/vpn-firewall.sh
+```
+
+### Enabling Tailscale (or NordVPN Meshnet)
+
+Both use the `100.64.0.0/10` CGNAT range — no config changes needed when switching between them.
+
+```bash
+# 1. Install and connect
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up   # follow the auth URL printed
+
+# 2. Re-run the firewall to restrict SSH + k3s API to VPN peers
+VPN_SUBNET=100.64.0.0/10 bash setup/vpn-firewall.sh
+```
+
+After step 2, SSH from outside your Tailscale network will be blocked — ensure you are connected before running it.
+
+**To switch VPN providers** (e.g. Tailscale → NordVPN Meshnet): install the new client, run `tailscale up` or `nordvpn meshnet`, uninstall the old one. No firewall or Kubernetes changes needed.
+
 ## Kubernetes / GitOps
 
 ArgoCD watches `k8s/apps/` and auto-syncs on every push to `main`. To deploy a new app, use the scaffold script:
 
 ```bash
 APP_NAME=my-api IMAGE=ghcr.io/org/my-api:latest bash setup/new-app.sh
-# Optional overrides: PORT=8080  DOMAIN=api.example.com
+
+# Optional overrides
+APP_NAME=my-api IMAGE=ghcr.io/org/my-api:latest PORT=8080 DOMAIN=api.example.com bash setup/new-app.sh
 ```
 
 This copies `k8s/apps/example-app/` into `k8s/apps/my-api/`, substitutes all names/image/port/domain, and prints the `git add / commit / push` commands to trigger a sync.
 
-Each app is routed by hostname via Traefik (k3s built-in). By default the ingress host is set to `<app-name>.<node-ip>.nip.io` (no DNS setup required). Point a custom subdomain's A record at the node IP and pass it as `DOMAIN=` to use a real domain instead.
+**Hostnames and nip.io:** by default the ingress host is `<app-name>.<node-ip>.nip.io`. [nip.io](https://nip.io) is a free wildcard DNS service — any hostname of the form `<label>.<ip>.nip.io` resolves to `<ip>`, so no DNS setup is required. To use a real domain, point its A record at the node IP and pass `DOMAIN=api.example.com` to the scaffold script.
 
 **repoURL:** `init.sh` auto-detects the git remote and patches all `application.yaml` placeholders before applying anything, so no manual edits are needed before the first run.
+
+### ArgoCD UI access
+
+When `VPN_SUBNET` is set, the ArgoCD UI is exposed via Traefik at `http://argocd.<NODE_IP>.nip.io` behind a VPN IP-allowlist middleware.
+
+Without a VPN, access via port-forward:
+
+```bash
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+# open https://localhost:8080
+```
+
+Get the admin password:
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d
+```
+
+### Private registry images
+
+If your image requires authentication, create an image pull secret in the app namespace before (or after) ArgoCD syncs:
+
+```bash
+kubectl create secret docker-registry regcred \
+  -n my-api \
+  --docker-server=ghcr.io \
+  --docker-username=<github-username> \
+  --docker-password=<github-pat>
+```
+
+Then add `imagePullSecrets` to the Deployment in `k8s/apps/my-api/deployment.yaml`:
+
+```yaml
+spec:
+  template:
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        ...
+```
 
 ## Secret Management
 
@@ -152,30 +237,22 @@ A placeholder `Secret` (`stringData: {}`) is committed in `k8s/apps/example-app/
 
 ## TLS / HTTPS
 
-Certificates are managed by [cert-manager](https://cert-manager.io) with Let's Encrypt using HTTP-01 challenges via Traefik.
+Certificates are managed by [cert-manager](https://cert-manager.io) with Let's Encrypt using HTTP-01 challenges via Traefik. `init.sh` handles the full bootstrap automatically.
 
-**HTTP-01 limitation:** Let's Encrypt's verification servers must reach `http://<domain>/.well-known/acme-challenge/...` from the public internet. VPN-gated Ingresses (e.g., ArgoCD) cannot use HTTP-01 — use DNS-01 with a supported DNS provider for those.
+**HTTP-01 limitation:** Let's Encrypt's verification servers must reach `http://<domain>/.well-known/acme-challenge/...` from the public internet. VPN-gated ingresses (e.g. ArgoCD) cannot use HTTP-01 — use DNS-01 with a supported DNS provider for those.
 
-**Bootstrap steps (one-time):**
+### Staging → production
+
+Ingresses start with `cert-manager.io/cluster-issuer: letsencrypt-staging` — staging certs are not trusted by browsers but do not consume rate limits. Once confirmed working, promote to production:
 
 ```bash
-# 1. Apply the cert-manager Application and wait for pods
-kubectl apply -f k8s/system/cert-manager/application.yaml
-kubectl wait --for=condition=available deployment/cert-manager -n cert-manager --timeout=180s
+# Switch the issuer annotation
+kubectl annotate ingress <name> -n <namespace> \
+  cert-manager.io/cluster-issuer=letsencrypt-prod --overwrite
 
-# 2. Apply ClusterIssuers (update your email in cluster-issuers.yaml first)
-kubectl apply -f k8s/system/cert-manager/cluster-issuers.yaml
-
-# 3. Verify
-kubectl get clusterissuers
+# Delete the staging cert so cert-manager issues a new prod one
+kubectl delete certificate -n <namespace> <name>
 ```
-
-**Staging → production workflow:**
-1. Ingresses start with `cert-manager.io/cluster-issuer: "letsencrypt-staging"` — staging certs are not trusted by browsers but do not consume rate limits.
-2. Once a staging cert is confirmed issued (`kubectl describe certificate -n <ns> <name>`), change the annotation to `letsencrypt-prod` and delete the staging Certificate:
-   ```bash
-   kubectl delete certificate -n <namespace> <name>
-   ```
 
 ## Usage
 
@@ -186,5 +263,3 @@ cd aws/manifests/common        # or any other manifest directory
 terraform init
 terraform apply -var-file=vars.tfvars
 ```
-
-# todo
