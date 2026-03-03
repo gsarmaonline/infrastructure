@@ -43,28 +43,3 @@ variable "letsencrypt_email" {
   description = "Email for Let's Encrypt notifications."
 }
 
-variable "infisical_client_id" {
-  type      = string
-  default   = "placeholder"
-  sensitive = true
-}
-
-variable "infisical_client_secret" {
-  type      = string
-  default   = "placeholder"
-  sensitive = true
-}
-
-variable "encryption_key" {
-  type        = string
-  default     = ""
-  sensitive   = true
-  description = "Infisical ENCRYPTION_KEY (32-char hex). Auto-generated if empty."
-}
-
-variable "auth_secret" {
-  type        = string
-  default     = ""
-  sensitive   = true
-  description = "Infisical AUTH_SECRET (32-char hex). Auto-generated if empty."
-}

@@ -100,30 +100,9 @@ for ISSUER in letsencrypt-staging letsencrypt-prod; do
   fi
 done
 
-# ── 4. ESO pods + ClusterSecretStore ──────────────────────────────────────────
+# ── 4. Certificates across all namespaces ─────────────────────────────────────
 echo ""
-echo "[ 4 ] External Secrets Operator"
-ESO_PODS=$(kubectl get pods -n external-secrets --no-headers 2>/dev/null | wc -l | tr -d ' ')
-ESO_NOT_READY=$(kubectl get pods -n external-secrets --no-headers 2>/dev/null \
-  | awk '{print $2}' | grep -v "1/1\|2/2\|3/3" | wc -l | tr -d ' ')
-
-if [ "${ESO_PODS}" -gt 0 ] && [ "${ESO_NOT_READY}" -eq 0 ]; then
-  ok "ESO pods running (${ESO_PODS} pods)"
-else
-  fail "ESO pods not all ready (${ESO_NOT_READY} not ready of ${ESO_PODS})"
-fi
-
-CSS_STATUS=$(kubectl get clustersecretstore infisical-store \
-  -o jsonpath='{.status.conditions[0].type}' 2>/dev/null || echo "")
-if [ "${CSS_STATUS}" = "Ready" ]; then
-  ok "ClusterSecretStore infisical-store is Ready"
-else
-  fail "ClusterSecretStore infisical-store not Ready (status: ${CSS_STATUS:-not found})"
-fi
-
-# ── 5. Certificates across all namespaces ─────────────────────────────────────
-echo ""
-echo "[ 5 ] Certificates"
+echo "[ 4 ] Certificates"
 CERT_COUNT=0
 CERT_NOT_READY=0
 while IFS= read -r line; do
@@ -144,9 +123,9 @@ if [ "${CERT_COUNT}" -eq 0 ]; then
   warn "No certificates found yet (ArgoCD may still be syncing)"
 fi
 
-# ── 6. nip.io patch for example-app ingress ───────────────────────────────────
+# ── 5. nip.io patch for example-app ingress ───────────────────────────────────
 echo ""
-echo "[ 6 ] example-app nip.io ingress patch"
+echo "[ 5 ] example-app nip.io ingress patch"
 
 EXAMPLE_APP_URL=""
 if [ -n "${NODE_IP}" ]; then

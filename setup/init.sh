@@ -2,10 +2,12 @@
 # k3s server node initialization script
 # Installs k3s in server mode and bootstraps ArgoCD after the cluster is ready.
 #
-# Optional VPN-gated firewall + ArgoCD ingress:
-#   Set VPN_SUBNET before running (or export it from user_data) to enable:
-#     - SSH and k3s API restricted to VPN peers (100.64.0.0/10 by default)
-#     - ArgoCD UI exposed via Traefik with a VPN IP-allowlist
+# Baseline firewall (UFW) is always applied: deny incoming, 80/443 public,
+# 6443 localhost-only, SSH open (or VPN-only when VPN_SUBNET is set).
+#
+# Optional VPN-gated ArgoCD ingress:
+#   Set VPN_SUBNET before running to also restrict SSH/6443 to VPN peers and
+#   expose the ArgoCD UI via Traefik with a VPN IP-allowlist.
 #   Compatible with NordVPN Meshnet and Tailscale (both use 100.64.0.0/10).
 #   Example: VPN_SUBNET=100.64.0.0/10 bash init.sh
 
@@ -123,56 +125,14 @@ sed -i "s|you@example.com|${LETSENCRYPT_EMAIL}|g" \
 echo "Applying ClusterIssuers..."
 kubectl apply -f "${REPO_K8S_DIR}/system/cert-manager/cluster-issuers.yaml"
 
-# ── 7. Bootstrap ESO + Infisical ─────────────────────────────────────────────
-echo "Applying External Secrets Operator..."
-kubectl apply -f "${REPO_K8S_DIR}/system/external-secrets/application.yaml"
+# ── 6. Baseline firewall (always) ─────────────────────────────────────────────
+echo "Applying baseline firewall rules..."
+VPN_SUBNET="${VPN_SUBNET:-}" bash "${SETUP_DIR}/vpn-firewall.sh"
 
-echo "Applying Infisical system..."
-kubectl apply -f "${REPO_K8S_DIR}/system/infisical/application.yaml"
-
-echo "Waiting for external-secrets namespace (ArgoCD syncs it — up to 3 min)..."
-for i in $(seq 1 36); do
-  kubectl get namespace external-secrets &>/dev/null && break; sleep 5
-done
-kubectl get namespace external-secrets &>/dev/null || \
-  { echo "ERROR: external-secrets namespace not created after 3 min"; exit 1; }
-echo "external-secrets namespace ready."
-
-echo "Waiting for infisical namespace (ArgoCD syncs it — up to 3 min)..."
-for i in $(seq 1 36); do
-  kubectl get namespace infisical &>/dev/null && break; sleep 5
-done
-kubectl get namespace infisical &>/dev/null || \
-  { echo "ERROR: infisical namespace not created after 3 min"; exit 1; }
-echo "infisical namespace ready."
-
-ENCRYPTION_KEY="${ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
-AUTH_SECRET="${AUTH_SECRET:-$(openssl rand -hex 16)}"
-kubectl create secret generic infisical-secrets -n infisical \
-  --from-literal=ENCRYPTION_KEY="${ENCRYPTION_KEY}" \
-  --from-literal=AUTH_SECRET="${AUTH_SECRET}" \
-  --dry-run=client -o yaml | kubectl apply -f -
-echo "infisical-secrets applied."
-
-INFISICAL_CLIENT_ID="${INFISICAL_CLIENT_ID:-placeholder}"
-INFISICAL_CLIENT_SECRET="${INFISICAL_CLIENT_SECRET:-placeholder}"
-if [ "${INFISICAL_CLIENT_ID}" = "placeholder" ]; then
-  echo "WARNING: Using placeholder Infisical credentials. Secret sync will not work."
-  echo "  Set INFISICAL_CLIENT_ID and INFISICAL_CLIENT_SECRET to enable sync."
-fi
-kubectl create secret generic infisical-credentials -n external-secrets \
-  --from-literal=clientId="${INFISICAL_CLIENT_ID}" \
-  --from-literal=clientSecret="${INFISICAL_CLIENT_SECRET}" \
-  --dry-run=client -o yaml | kubectl apply -f -
-echo "infisical-credentials applied."
-
-# ── 8. VPN-gated firewall + ArgoCD ingress (optional) ─────────────────────────
+# ── 7. VPN-gated ArgoCD ingress (optional) ────────────────────────────────────
 if [ -n "${VPN_SUBNET:-}" ]; then
   echo ""
-  echo "VPN_SUBNET is set (${VPN_SUBNET}). Configuring VPN-gated access..."
-
-  # Firewall: restrict SSH + k3s API to VPN peers
-  VPN_SUBNET="${VPN_SUBNET}" bash "${SETUP_DIR}/vpn-firewall.sh"
+  echo "VPN_SUBNET is set (${VPN_SUBNET}). Configuring VPN-gated ArgoCD access..."
 
   # ArgoCD: run insecure so Traefik can apply the IP-allowlist middleware
   kubectl apply -f "${REPO_K8S_DIR}/system/argocd/argocd-params.yaml"
@@ -196,7 +156,7 @@ if [ -n "${VPN_SUBNET:-}" ]; then
   echo "  Access requires a VPN peer address in ${VPN_SUBNET}."
 else
   echo ""
-  echo "VPN_SUBNET not set — skipping firewall hardening and ArgoCD ingress."
+  echo "VPN_SUBNET not set — ArgoCD ingress not configured."
   echo "  Re-run with VPN_SUBNET=100.64.0.0/10 to enable VPN-gated access."
 fi
 

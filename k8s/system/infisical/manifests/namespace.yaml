@@ -1,8 +1,0 @@
----
-# Namespace for the self-hosted Infisical secret management server.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: infisical
-  labels:
-    app.kubernetes.io/managed-by: argocd

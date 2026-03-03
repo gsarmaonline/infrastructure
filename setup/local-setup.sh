@@ -4,8 +4,6 @@
 #
 # Differences from production:
 #   - TLS: self-signed ClusterIssuer instead of Let's Encrypt
-#   - Infisical credentials: stub values (ESO won't sync real secrets without
-#     a real Machine Identity — see README for how to wire that up)
 #   - VPN firewall: not applied (no VPN_SUBNET set)
 #
 # Prerequisites:
@@ -126,8 +124,6 @@ echo "[ 3 ] Bootstrap cluster"
 info "Running init.sh — this takes ~5 minutes…"
 vm_exec "NODE_IP=${NODE_IP} \
   LETSENCRYPT_EMAIL=local-test@local.dev \
-  INFISICAL_CLIENT_ID=local-placeholder \
-  INFISICAL_CLIENT_SECRET=local-placeholder \
   bash /root/infrastructure/setup/init.sh"
 ok "init.sh complete"
 
@@ -197,6 +193,5 @@ echo "    limactl delete --force ${VM_NAME}                  # destroy VM"
 echo ""
 echo "  Known limitations (local only):"
 echo "    ✗ Let's Encrypt — replaced with self-signed (browser cert warning)"
-echo "    ✗ Infisical secret sync — needs real Machine Identity credentials"
 echo "    ✗ VPN firewall — not applied"
 echo ""

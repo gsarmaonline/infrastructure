@@ -4,9 +4,6 @@ kind: Deployment
 metadata:
   name: example-app
   namespace: example-app
-  annotations:
-    # Wave 3: after ExternalSecret (wave 2) so the secret exists before pod starts
-    argocd.argoproj.io/sync-wave: "3"
   labels:
     app: example-app
 spec:
@@ -24,14 +21,13 @@ spec:
           image: nginx:stable-alpine
           ports:
             - containerPort: 80
-          # Consume secrets injected by ESO:
-          #   global-secrets     → ClusterExternalSecret in k8s/apps/_global/
-          #   example-app-secrets → ExternalSecret in k8s/apps/example-app/
           envFrom:
             - secretRef:
                 name: global-secrets
+                optional: true
             - secretRef:
                 name: example-app-secrets
+                optional: true
           resources:
             requests:
               cpu: "50m"

@@ -32,13 +32,13 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
 │
 ├── setup/                  # Node initialization scripts
 │   ├── cloud-init.sh.tpl   # Terraform template: sets env vars, clones repo, calls init.sh
-│   ├── init.sh             # Full bootstrap: k3s, ArgoCD, cert-manager, ESO + Infisical
+│   ├── init.sh             # Full bootstrap: k3s, ArgoCD, cert-manager, baseline firewall
 │   ├── local-setup.sh      # Local dev setup — spins up a Lima VM and bootstraps it
 │   ├── lima.yaml           # Lima VM config (Ubuntu 22.04, vzNAT networking)
-│   ├── verify.sh           # Post-bootstrap health check (node, ArgoCD, certs, ESO)
+│   ├── verify.sh           # Post-bootstrap health check (node, ArgoCD, certs)
 │   ├── new-app.sh          # Scaffold a new app from the example-app template
 │   ├── worker-init.sh      # k3s agent join script for worker nodes
-│   └── vpn-firewall.sh     # Restricts SSH + k3s API to VPN peers (optional)
+│   └── vpn-firewall.sh     # Baseline + optional VPN-gated firewall rules
 │
 └── k8s/                    # Kubernetes manifests (synced by ArgoCD)
     ├── system/
@@ -51,18 +51,7 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
     │   ├── cert-manager/           # cert-manager + Let's Encrypt ClusterIssuers
     │   │   ├── application.yaml    # ArgoCD Application (Helm install)
     │   │   └── cluster-issuers.yaml  # staging + prod ClusterIssuers (HTTP-01 / Traefik)
-    │   ├── external-secrets/       # External Secrets Operator (ESO)
-    │   │   ├── application.yaml    # ArgoCD Application (Helm install)
-    │   │   └── install.yaml        # ESO namespace
-    │   └── infisical/              # Self-hosted Infisical secret manager
-    │       ├── application.yaml    # Parent ArgoCD Application (syncs directory)
-    │       ├── namespace.yaml      # Infisical namespace
-    │       ├── helmrelease.yaml    # Nested ArgoCD App: Infisical Helm chart + Postgres + Redis
-    │       └── cluster-secret-store.yaml  # ESO ClusterSecretStore → Infisical
     └── apps/
-        ├── _global/                # Global secrets injected into every opted-in namespace
-        │   ├── application.yaml    # ArgoCD Application
-        │   └── cluster-external-secret.yaml
         └── example-app/           # Example app (deployment, service, ingress, secrets)
 ```
 
@@ -90,11 +79,10 @@ example-app URLs are printed at the end.
 
 **Local limitations vs production:**
 - TLS uses self-signed certs (browser will warn — expected)
-- Infisical secret sync needs real Machine Identity credentials to work
 - VPN firewall is not applied
 
 ### Server node (cloud)
-EC2 instances and DigitalOcean Droplets use `setup/cloud-init.sh.tpl` as `user_data` via Terraform's `templatefile()`. On first boot, cloud-init clones the repo and runs `init.sh`, which fully bootstraps the cluster: k3s, ArgoCD, cert-manager, ESO, and Infisical (including bootstrap secrets).
+EC2 instances and DigitalOcean Droplets use `setup/cloud-init.sh.tpl` as `user_data` via Terraform's `templatefile()`. On first boot, cloud-init clones the repo and runs `init.sh`, which fully bootstraps the cluster: k3s, ArgoCD, cert-manager, and baseline firewall rules.
 
 Pass deployment variables to the Terraform module:
 
@@ -102,11 +90,7 @@ Pass deployment variables to the Terraform module:
 |---|---|---|
 | `repo_url` | *(required)* | HTTPS git URL to clone on boot |
 | `letsencrypt_email` | `you@example.com` | Email for Let's Encrypt notifications |
-| `vpn_subnet` | `""` | VPN CIDR to enable firewall + ArgoCD ingress |
-| `infisical_client_id` | `placeholder` | Machine Identity client ID |
-| `infisical_client_secret` | `placeholder` | Machine Identity client secret |
-| `encryption_key` | `""` | Infisical ENCRYPTION_KEY (auto-generated if empty) |
-| `auth_secret` | `""` | Infisical AUTH_SECRET (auto-generated if empty) |
+| `vpn_subnet` | `""` | VPN CIDR to restrict SSH/6443 to VPN peers + expose ArgoCD ingress |
 
 ### Verify bootstrap
 
@@ -117,7 +101,7 @@ bash setup/verify.sh              # auto-detects node IP
 NODE_IP=1.2.3.4 bash verify.sh   # explicit override
 ```
 
-It checks: k3s node Ready → ArgoCD apps Synced/Healthy → cert-manager + ClusterIssuers → ESO + ClusterSecretStore → all Certificates → patches the `example-app` ingress to `example-app.<NODE_IP>.nip.io`. Ends with an access summary (ArgoCD URL + admin password).
+It checks: k3s node Ready → ArgoCD apps Synced/Healthy → cert-manager + ClusterIssuers → all Certificates → patches the `example-app` ingress to `example-app.<NODE_IP>.nip.io`. Ends with an access summary (ArgoCD URL + admin password).
 
 ### Worker nodes
 Worker nodes run `setup/worker-init.sh`, which joins an existing k3s cluster. Pass `K3S_URL` and `K3S_TOKEN` as environment variables in `user_data`:
@@ -146,32 +130,26 @@ Each app is routed by hostname via Traefik (k3s built-in). By default the ingres
 
 ## Secret Management
 
-Secrets are managed with [External Secrets Operator](https://external-secrets.io) (ESO) pulling from a self-hosted [Infisical](https://infisical.com) instance running inside the cluster.
+Secrets are plain Kubernetes Secrets stored in etcd. No additional secret-sync operator is required.
 
-**Secret scopes:**
-- **Global secrets** — a `ClusterExternalSecret` in `k8s/apps/_global/` injects a `global-secrets` Kubernetes Secret into every namespace labelled `secrets.infisical.com/inject-global: "true"`.
-- **App-specific secrets** — an `ExternalSecret` per app namespace (e.g. `k8s/apps/example-app/external-secret.yaml`) injects only that app's secrets.
+Apps consume secrets via `envFrom` in their Deployment (both refs are `optional: true`, so pods start even if the secret doesn't exist yet):
 
-**Bootstrap steps (one-time):**
-
-`init.sh` (and therefore `local-setup.sh` + cloud deployments) automatically handles steps 1–2. The remaining steps are one-time manual configuration:
-
-```bash
-# 1–2. Handled automatically by init.sh:
-#   - ESO + Infisical Applications applied to ArgoCD
-#   - infisical-secrets (ENCRYPTION_KEY, AUTH_SECRET) created
-#   - infisical-credentials created (placeholder or real values from env)
-
-# 3. Create a Machine Identity in the Infisical UI → Project Settings → Machine Identities
-#    Then pass the credentials as Terraform variables (cloud) or set env vars (local).
-
-# 4. Update projectSlug / environmentSlug TODOs in cluster-secret-store.yaml and commit.
-
-# 5. Opt namespaces into global secrets
-kubectl label namespace example-app secrets.infisical.com/inject-global=true
+```yaml
+envFrom:
+  - secretRef:
+      name: example-app-secrets
+      optional: true
 ```
 
-Apps consume secrets via `envFrom` in their Deployment — see `k8s/apps/example-app/deployment.yaml` for the pattern.
+Create or update a secret with:
+
+```bash
+kubectl create secret generic example-app-secrets -n example-app \
+  --from-literal=MY_KEY=value \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+A placeholder `Secret` (`stringData: {}`) is committed in `k8s/apps/example-app/secret.yaml` so ArgoCD does not show the app as degraded before real values are set.
 
 ## TLS / HTTPS
 

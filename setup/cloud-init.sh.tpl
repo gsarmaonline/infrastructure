@@ -5,11 +5,6 @@ set -euo pipefail
 # ── Environment (injected by Terraform at plan time) ──────────────────────────
 export VPN_SUBNET="${vpn_subnet}"
 export LETSENCRYPT_EMAIL="${letsencrypt_email}"
-export INFISICAL_CLIENT_ID="${infisical_client_id}"
-export INFISICAL_CLIENT_SECRET="${infisical_client_secret}"
-# Encryption keys: provided values or left empty so init.sh auto-generates them
-export ENCRYPTION_KEY="${encryption_key}"
-export AUTH_SECRET="${auth_secret}"
 
 # ── Clone repo and run bootstrap ──────────────────────────────────────────────
 apt-get update -qq && apt-get install -y -qq git
