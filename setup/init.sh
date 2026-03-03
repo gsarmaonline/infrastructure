@@ -87,9 +87,12 @@ kubectl apply -f "${REPO_K8S_DIR}/system/cert-manager/application.yaml"
 
 echo "Waiting for cert-manager namespace (ArgoCD syncs it — up to 3 min)..."
 until kubectl get namespace cert-manager &>/dev/null; do sleep 5; done
-echo "Waiting for cert-manager deployment to be available..."
+echo "Waiting for cert-manager deployments to be available (controller + webhook)..."
 kubectl wait --for=condition=available deployment/cert-manager \
   -n cert-manager --timeout=180s
+# The webhook must be ready before ClusterIssuer CRs can be accepted
+kubectl wait --for=condition=available deployment/cert-manager-webhook \
+  -n cert-manager --timeout=120s
 
 echo "Applying ClusterIssuers..."
 kubectl apply -f "${REPO_K8S_DIR}/system/cert-manager/cluster-issuers.yaml"
