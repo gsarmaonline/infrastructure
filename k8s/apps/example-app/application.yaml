@@ -16,6 +16,10 @@ spec:
     repoURL: https://github.com/gsarmaonline/infrastructure.git
     targetRevision: main
     path: k8s/apps/example-app
+    # Exclude application.yaml itself so this Application doesn't watch its own
+    # definition — prevents a self-reference drift/oscillation loop.
+    directory:
+      exclude: 'application.yaml'
   destination:
     server: https://kubernetes.default.svc
     namespace: example-app
