@@ -120,52 +120,20 @@ vm_exec "rm -rf /root/infrastructure && \
   mv /tmp/${REPO_BASENAME} /root/infrastructure"
 ok "Repo at /root/infrastructure"
 
-# ── 4. Patch placeholder secrets (local only — never committed) ───────────────
+# ── 3. Run init.sh ────────────────────────────────────────────────────────────
 echo ""
-echo "[ 3 ] Generate ephemeral secrets"
-info "Patching Let's Encrypt email placeholder…"
-
-info "Patching Let's Encrypt email placeholder…"
-vm_exec "sed -i 's|you@example.com|local-test@local.dev|g' \
-  /root/infrastructure/k8s/system/cert-manager/cluster-issuers.yaml"
-
-ok "Secrets patched (ephemeral — changes live only inside the VM)"
-
-# ── 5. Run init.sh ────────────────────────────────────────────────────────────
-echo ""
-echo "[ 4 ] Bootstrap cluster"
+echo "[ 3 ] Bootstrap cluster"
 info "Running init.sh — this takes ~5 minutes…"
-vm_exec "NODE_IP=${NODE_IP} bash /root/infrastructure/setup/init.sh"
+vm_exec "NODE_IP=${NODE_IP} \
+  LETSENCRYPT_EMAIL=local-test@local.dev \
+  INFISICAL_CLIENT_ID=local-placeholder \
+  INFISICAL_CLIENT_SECRET=local-placeholder \
+  bash /root/infrastructure/setup/init.sh"
 ok "init.sh complete"
 
-# ── 5b. Bootstrap system apps (ESO + Infisical) ──────────────────────────────
+# ── 4. Self-signed ClusterIssuer for TLS ─────────────────────────────────────
 echo ""
-echo "[ 5 ] Bootstrap system apps (ESO + Infisical)"
-info "Applying External Secrets Operator ArgoCD Application…"
-vm_kubectl apply -f /root/infrastructure/k8s/system/external-secrets/application.yaml
-info "Applying Infisical system ArgoCD Application…"
-vm_kubectl apply -f /root/infrastructure/k8s/system/infisical/application.yaml
-ok "System apps registered with ArgoCD"
-
-info "Waiting for external-secrets namespace (ArgoCD syncs it — up to 3 min)…"
-for i in $(seq 1 36); do
-  vm_kubectl get namespace external-secrets &>/dev/null && break
-  sleep 5
-done
-vm_kubectl get namespace external-secrets &>/dev/null || fail "external-secrets namespace not created after 3 min"
-ok "external-secrets namespace ready"
-
-info "Waiting for infisical namespace (ArgoCD syncs it — up to 3 min)…"
-for i in $(seq 1 36); do
-  vm_kubectl get namespace infisical &>/dev/null && break
-  sleep 5
-done
-vm_kubectl get namespace infisical &>/dev/null || fail "infisical namespace not created after 3 min"
-ok "infisical namespace ready"
-
-# ── 6. Self-signed ClusterIssuer for TLS ─────────────────────────────────────
-echo ""
-echo "[ 6 ] Self-signed TLS (local replacement for Let's Encrypt)"
+echo "[ 4 ] Self-signed TLS (local replacement for Let's Encrypt)"
 ISSUER_MANIFEST="$(mktemp /tmp/selfsigned-XXXXXX.yaml)"
 cat > "${ISSUER_MANIFEST}" <<'EOF'
 apiVersion: cert-manager.io/v1
@@ -191,37 +159,9 @@ else
   warn "    -n example-app cert-manager.io/cluster-issuer=selfsigned --overwrite"
 fi
 
-# ── 7. Infisical bootstrap secrets ───────────────────────────────────────────
+# ── 5. Verify ─────────────────────────────────────────────────────────────────
 echo ""
-echo "[ 7 ] Infisical bootstrap secrets"
-
-# infisical-secrets: encryption keys read by the Infisical app pod at startup.
-# ENCRYPTION_KEY must be exactly 32 chars (openssl rand -hex 16 = 32 hex chars).
-info "Creating infisical-secrets with random encryption keys…"
-vm_exec "
-  ENC_KEY=\$(openssl rand -hex 16)
-  AUTH_KEY=\$(openssl rand -hex 16)
-  kubectl create secret generic infisical-secrets -n infisical \
-    --from-literal=ENCRYPTION_KEY=\${ENC_KEY} \
-    --from-literal=AUTH_SECRET=\${AUTH_KEY} \
-    --dry-run=client -o yaml | kubectl apply -f -
-  echo 'infisical-secrets created'
-"
-ok "infisical-secrets created"
-
-# infisical-credentials: ESO Machine Identity credentials — placeholder for local.
-warn "Creating placeholder infisical-credentials so ESO doesn't error on a missing secret."
-warn "Replace with real values to enable secret sync (see cluster-secret-store.yaml)."
-vm_kubectl create secret generic infisical-credentials \
-  -n external-secrets \
-  --from-literal=clientId=local-placeholder \
-  --from-literal=clientSecret=local-placeholder \
-  --dry-run=client -o yaml | vm_kubectl apply -f -
-ok "Stub secret applied"
-
-# ── 8. Verify ─────────────────────────────────────────────────────────────────
-echo ""
-echo "[ 8 ] Verify"
+echo "[ 5 ] Verify"
 info "Waiting 30s for ArgoCD to complete initial sync…"
 sleep 30
 vm_exec "NODE_IP=${NODE_IP} bash /root/infrastructure/setup/verify.sh" || true

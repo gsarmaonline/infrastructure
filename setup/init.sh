@@ -94,10 +94,56 @@ kubectl wait --for=condition=available deployment/cert-manager \
 kubectl wait --for=condition=available deployment/cert-manager-webhook \
   -n cert-manager --timeout=120s
 
+LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-you@example.com}"
+sed -i "s|you@example.com|${LETSENCRYPT_EMAIL}|g" \
+  "${REPO_K8S_DIR}/system/cert-manager/cluster-issuers.yaml"
 echo "Applying ClusterIssuers..."
 kubectl apply -f "${REPO_K8S_DIR}/system/cert-manager/cluster-issuers.yaml"
 
-# ── 6. VPN-gated firewall + ArgoCD ingress (optional) ─────────────────────────
+# ── 7. Bootstrap ESO + Infisical ─────────────────────────────────────────────
+echo "Applying External Secrets Operator..."
+kubectl apply -f "${REPO_K8S_DIR}/system/external-secrets/application.yaml"
+
+echo "Applying Infisical system..."
+kubectl apply -f "${REPO_K8S_DIR}/system/infisical/application.yaml"
+
+echo "Waiting for external-secrets namespace (ArgoCD syncs it — up to 3 min)..."
+for i in $(seq 1 36); do
+  kubectl get namespace external-secrets &>/dev/null && break; sleep 5
+done
+kubectl get namespace external-secrets &>/dev/null || \
+  { echo "ERROR: external-secrets namespace not created after 3 min"; exit 1; }
+echo "external-secrets namespace ready."
+
+echo "Waiting for infisical namespace (ArgoCD syncs it — up to 3 min)..."
+for i in $(seq 1 36); do
+  kubectl get namespace infisical &>/dev/null && break; sleep 5
+done
+kubectl get namespace infisical &>/dev/null || \
+  { echo "ERROR: infisical namespace not created after 3 min"; exit 1; }
+echo "infisical namespace ready."
+
+ENCRYPTION_KEY="${ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
+AUTH_SECRET="${AUTH_SECRET:-$(openssl rand -hex 16)}"
+kubectl create secret generic infisical-secrets -n infisical \
+  --from-literal=ENCRYPTION_KEY="${ENCRYPTION_KEY}" \
+  --from-literal=AUTH_SECRET="${AUTH_SECRET}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+echo "infisical-secrets applied."
+
+INFISICAL_CLIENT_ID="${INFISICAL_CLIENT_ID:-placeholder}"
+INFISICAL_CLIENT_SECRET="${INFISICAL_CLIENT_SECRET:-placeholder}"
+if [ "${INFISICAL_CLIENT_ID}" = "placeholder" ]; then
+  echo "WARNING: Using placeholder Infisical credentials. Secret sync will not work."
+  echo "  Set INFISICAL_CLIENT_ID and INFISICAL_CLIENT_SECRET to enable sync."
+fi
+kubectl create secret generic infisical-credentials -n external-secrets \
+  --from-literal=clientId="${INFISICAL_CLIENT_ID}" \
+  --from-literal=clientSecret="${INFISICAL_CLIENT_SECRET}" \
+  --dry-run=client -o yaml | kubectl apply -f -
+echo "infisical-credentials applied."
+
+# ── 8. VPN-gated firewall + ArgoCD ingress (optional) ─────────────────────────
 if [ -n "${VPN_SUBNET:-}" ]; then
   echo ""
   echo "VPN_SUBNET is set (${VPN_SUBNET}). Configuring VPN-gated access..."

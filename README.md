@@ -31,7 +31,8 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
 │   └── prometheus-grafana/ # Prometheus + Grafana monitoring
 │
 ├── setup/                  # Node initialization scripts
-│   ├── init.sh             # k3s server install + ArgoCD bootstrap (runs via user_data)
+│   ├── cloud-init.sh.tpl   # Terraform template: sets env vars, clones repo, calls init.sh
+│   ├── init.sh             # Full bootstrap: k3s, ArgoCD, cert-manager, ESO + Infisical
 │   ├── local-setup.sh      # Local dev setup — spins up a Lima VM and bootstraps it
 │   ├── lima.yaml           # Lima VM config (Ubuntu 22.04, vzNAT networking)
 │   ├── verify.sh           # Post-bootstrap health check (node, ArgoCD, certs, ESO)
@@ -93,7 +94,19 @@ example-app URLs are printed at the end.
 - VPN firewall is not applied
 
 ### Server node (cloud)
-All EC2 instances and DigitalOcean Droplets run `setup/init.sh` on first boot via `user_data` (cloud-init). This installs k3s in server mode and bootstraps ArgoCD.
+EC2 instances and DigitalOcean Droplets use `setup/cloud-init.sh.tpl` as `user_data` via Terraform's `templatefile()`. On first boot, cloud-init clones the repo and runs `init.sh`, which fully bootstraps the cluster: k3s, ArgoCD, cert-manager, ESO, and Infisical (including bootstrap secrets).
+
+Pass deployment variables to the Terraform module:
+
+| Variable | Default | Description |
+|---|---|---|
+| `repo_url` | *(required)* | HTTPS git URL to clone on boot |
+| `letsencrypt_email` | `you@example.com` | Email for Let's Encrypt notifications |
+| `vpn_subnet` | `""` | VPN CIDR to enable firewall + ArgoCD ingress |
+| `infisical_client_id` | `placeholder` | Machine Identity client ID |
+| `infisical_client_secret` | `placeholder` | Machine Identity client secret |
+| `encryption_key` | `""` | Infisical ENCRYPTION_KEY (auto-generated if empty) |
+| `auth_secret` | `""` | Infisical AUTH_SECRET (auto-generated if empty) |
 
 ### Verify bootstrap
 
@@ -141,21 +154,20 @@ Secrets are managed with [External Secrets Operator](https://external-secrets.io
 
 **Bootstrap steps (one-time):**
 
+`init.sh` (and therefore `local-setup.sh` + cloud deployments) automatically handles steps 1–2. The remaining steps are one-time manual configuration:
+
 ```bash
-# 1. Apply ESO and Infisical system apps (edit repoURL TODOs first)
-kubectl apply -f k8s/system/external-secrets/application.yaml
-kubectl apply -f k8s/system/infisical/application.yaml
+# 1–2. Handled automatically by init.sh:
+#   - ESO + Infisical Applications applied to ArgoCD
+#   - infisical-secrets (ENCRYPTION_KEY, AUTH_SECRET) created
+#   - infisical-credentials created (placeholder or real values from env)
 
-# 2. Fill in ENCRYPTION_KEY, AUTH_SECRET, DB password in helmrelease.yaml, then:
-#    Create a Machine Identity in the Infisical UI → Project Settings → Machine Identities
-kubectl create secret generic infisical-credentials \
-  -n external-secrets \
-  --from-literal=clientId=<id> \
-  --from-literal=clientSecret=<secret>
+# 3. Create a Machine Identity in the Infisical UI → Project Settings → Machine Identities
+#    Then pass the credentials as Terraform variables (cloud) or set env vars (local).
 
-# 3. Update projectSlug / envSlug TODOs in cluster-secret-store.yaml
+# 4. Update projectSlug / environmentSlug TODOs in cluster-secret-store.yaml and commit.
 
-# 4. Opt namespaces into global secrets
+# 5. Opt namespaces into global secrets
 kubectl label namespace example-app secrets.infisical.com/inject-global=true
 ```
 

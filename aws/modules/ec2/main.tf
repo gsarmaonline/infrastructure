@@ -7,7 +7,15 @@ resource "aws_instance" "instance" {
   vpc_security_group_ids = [data.aws_security_group.sg.id]
   associate_public_ip_address = true
   subnet_id = data.aws_subnet.subnet.id
-  user_data = file("${path.root}/../../../setup/init.sh")
+  user_data = templatefile("${path.root}/../../../setup/cloud-init.sh.tpl", {
+    repo_url                = var.repo_url
+    vpn_subnet              = var.vpn_subnet
+    letsencrypt_email       = var.letsencrypt_email
+    infisical_client_id     = var.infisical_client_id
+    infisical_client_secret = var.infisical_client_secret
+    encryption_key          = var.encryption_key
+    auth_secret             = var.auth_secret
+  })
 
   credit_specification {
     cpu_credits = "unlimited"
