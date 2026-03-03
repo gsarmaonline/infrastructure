@@ -48,11 +48,11 @@ Contains infrastructure-as-code and tooling for managing cloud resources across 
     │   │   ├── argocd-params.yaml  # Sets ArgoCD server to insecure mode (for Traefik)
     │   │   ├── vpn-middleware.yaml # Traefik IP-allowlist middleware for VPN peers
     │   │   └── ingress.yaml        # ArgoCD UI ingress (VPN-gated, plain HTTP)
-    │   ├── cert-manager/           # cert-manager + Let's Encrypt ClusterIssuers
-    │   │   ├── application.yaml    # ArgoCD Application (Helm install)
-    │   │   └── cluster-issuers.yaml  # staging + prod ClusterIssuers (HTTP-01 / Traefik)
+    │   └── cert-manager/           # cert-manager + Let's Encrypt ClusterIssuers
+    │       ├── application.yaml    # ArgoCD Application (Helm install)
+    │       └── cluster-issuers.yaml  # staging + prod ClusterIssuers (HTTP-01 / Traefik)
     └── apps/
-        └── example-app/           # Example app (deployment, service, ingress, secrets)
+        └── example-app/           # Example app (deployment, service, ingress, secret)
 ```
 
 ## Node Setup
@@ -73,9 +73,8 @@ VM_NAME=my-test VM_CPUS=4 VM_MEMORY=8GiB bash setup/local-setup.sh
 ```
 
 The script handles everything: VM creation (Ubuntu 22.04, vzNAT networking),
-repo transfer, ephemeral secret generation, `init.sh`, a self-signed
-`ClusterIssuer` (replacing Let's Encrypt), and a health check. ArgoCD UI and
-example-app URLs are printed at the end.
+repo transfer, `init.sh`, a self-signed `ClusterIssuer` (replacing Let's Encrypt),
+and a health check. ArgoCD UI and example-app URLs are printed at the end.
 
 **Local limitations vs production:**
 - TLS uses self-signed certs (browser will warn — expected)
