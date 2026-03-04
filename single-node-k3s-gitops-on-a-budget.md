@@ -202,7 +202,69 @@ k8s/
 System components (`argocd`, `cert-manager`) are applied once by `init.sh`. Everything
 under `k8s/apps/` is discovered and synced by ArgoCD on every push to `main`.
 
-### Phase 3: App scaffold
+### Phase 3: The example-app
+
+The repo ships with a working `example-app` — an nginx container wired up with a
+Deployment, Service, Ingress, and a placeholder Secret. It's live at
+`https://example-app.<node-ip>.nip.io` immediately after bootstrap.
+
+The deployment is deliberately minimal:
+
+```yaml
+containers:
+  - name: example-app
+    image: nginx:stable-alpine
+    ports:
+      - containerPort: 80
+    envFrom:
+      - secretRef:
+          name: global-secrets
+          optional: true
+      - secretRef:
+          name: example-app-secrets
+          optional: true
+```
+
+Two things worth noting. First, `optional: true` on both secret refs — the pod starts
+cleanly even before any secrets exist. Without this flag, a missing Secret causes the
+pod to stay in `Pending` with a somewhat cryptic event message.
+
+Second, the placeholder `secret.yaml` committed alongside the app:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: example-app-secrets
+  namespace: example-app
+type: Opaque
+stringData: {}
+```
+
+An empty Secret might seem pointless, but it prevents ArgoCD from showing the app as
+`Degraded` when it first syncs and the secret hasn't been populated yet. ArgoCD sees the
+resource exists; the pod sees `optional: true` and ignores the empty data. To inject real
+values later without putting them in git:
+
+```bash
+kubectl create secret generic example-app-secrets -n example-app \
+  --from-literal=MY_KEY=value \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+TLS is handled automatically by cert-manager. The ingress starts with
+`cert-manager.io/cluster-issuer: letsencrypt-staging` — staging certs aren't browser-trusted
+but don't burn through Let's Encrypt's rate limits while you're validating the setup. Once
+the staging cert appears as `Ready`, switch to `letsencrypt-prod` and delete the old cert
+to trigger reissuance:
+
+```bash
+kubectl annotate ingress example-app -n example-app \
+  cert-manager.io/cluster-issuer=letsencrypt-prod --overwrite
+kubectl delete certificate -n example-app <cert-name>
+```
+
+### Phase 4: App scaffold
 
 New apps are scaffolded from the `example-app` template:
 
